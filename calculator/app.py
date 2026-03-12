@@ -1,3 +1,5 @@
+"""Tkinter GUI for Calcforshort: The Extensible Calculator App."""
+
 from __future__ import annotations
 
 import argparse
@@ -66,21 +68,27 @@ def _find_matching_open_paren(text: str, close_index: int) -> int | None:
 
 
 class CalculatorApp:
+    """Own the calculator window, widgets, theming, and user interactions."""
+
     def __init__(self, root: tk.Tk, plugins: list[LoadedPlugin], settings: AppSettings) -> None:
         self.root = root
-        self.root.title("Plugin Calculator")
+        self.root.title("Calcforshort: The Extensible Calculator App")
         self.root.resizable(True, True)
         self.root.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
 
         self.plugins = plugins
         self.settings = settings
+        all_plugin_ids = {plugin.plugin_id for plugin in plugins}
+        disabled_from_settings = set(settings.disabled_plugin_ids)
         enabled_from_settings = set(settings.enabled_plugin_ids)
-        if enabled_from_settings:
+        if disabled_from_settings:
+            self.enabled_plugin_ids = all_plugin_ids - disabled_from_settings
+        elif enabled_from_settings:
             self.enabled_plugin_ids = {
                 plugin.plugin_id for plugin in plugins if plugin.plugin_id in enabled_from_settings
             }
         else:
-            self.enabled_plugin_ids = {plugin.plugin_id for plugin in plugins}
+            self.enabled_plugin_ids = all_plugin_ids
         self.plugin_enabled_vars = {
             plugin.plugin_id: tk.BooleanVar(value=plugin.plugin_id in self.enabled_plugin_ids)
             for plugin in plugins
@@ -113,6 +121,7 @@ class CalculatorApp:
         self.expression_var.trace_add("write", self._on_expression_changed)
 
     def _build_ui(self) -> None:
+        """Create the menu bar and the initial window layout."""
         self.root.config(menu=self.menu_bar)
         self.menu_bar.add_cascade(label="Settings", menu=self.settings_menu)
         self.settings_menu.add_checkbutton(
@@ -139,6 +148,7 @@ class CalculatorApp:
         self._apply_theme()
 
     def _render_layout(self) -> None:
+        """Rebuild the main calculator layout from the current state."""
         if self.frame is not None:
             self.frame.destroy()
 
@@ -248,6 +258,7 @@ class CalculatorApp:
             self.display.focus_set()
 
     def _render_plugin_buttons(self) -> None:
+        """Render buttons for all currently enabled plugins."""
         if self.plugin_frame is None:
             return
 
@@ -287,12 +298,15 @@ class CalculatorApp:
             self.plugin_buttons.append(button)
 
     def _make_insert_handler(self, value: str) -> Callable[[], None]:
+        """Return a button command that inserts *value* into the entry."""
         return lambda: self.insert_text(value)
 
     def _enabled_plugins(self) -> list[LoadedPlugin]:
+        """Return plugins that are currently enabled in the UI."""
         return [plugin for plugin in self.plugins if plugin.plugin_id in self.enabled_plugin_ids]
 
     def _on_expression_changed(self, *_: object) -> None:
+        """Refresh the result display after entry edits in live mode."""
         if self.live_mode.get():
             self._evaluate_into_result(live=True)
             return
@@ -300,10 +314,12 @@ class CalculatorApp:
         self._clear_result_display()
 
     def toggle_dark_mode(self) -> None:
+        """Apply the selected color theme and persist the preference."""
         self._apply_theme()
         self._save_settings()
 
     def toggle_live_mode(self) -> None:
+        """Enable or disable automatic evaluation while typing."""
         if self.live_mode.get():
             self._evaluate_into_result(live=True)
         else:
@@ -311,6 +327,7 @@ class CalculatorApp:
         self._save_settings()
 
     def toggle_plugin(self, plugin_id: str) -> None:
+        """Enable or disable a plugin button and callable by *plugin_id*."""
         if self.plugin_enabled_vars[plugin_id].get():
             self.enabled_plugin_ids.add(plugin_id)
         else:
@@ -325,6 +342,7 @@ class CalculatorApp:
         self._save_settings()
 
     def _apply_theme(self) -> None:
+        """Update widget colors to match the active light or dark theme."""
         theme = DARK_THEME if self.dark_mode.get() else LIGHT_THEME
 
         self.root.configure(bg=theme["root_bg"])
@@ -383,12 +401,14 @@ class CalculatorApp:
                     child.configure(bg=theme["panel_bg"], fg=theme["display_fg"])
 
     def _apply_saved_window_state(self) -> None:
+        """Restore saved window geometry and maximized state."""
         if self.settings.window_geometry:
             self.root.geometry(self.settings.window_geometry)
         if self.settings.maximized:
             self._maximize_window()
 
     def _maximize_window(self) -> None:
+        """Maximize the window using the platform-specific Tk mechanism."""
         if sys.platform.startswith("win"):
             self.root.state("zoomed")
             return
@@ -399,6 +419,7 @@ class CalculatorApp:
             pass
 
     def _on_root_configure(self, event: tk.Event[tk.Misc]) -> None:
+        """Debounce resize handling for the root window."""
         if event.widget is not self.root:
             return
 
@@ -407,6 +428,7 @@ class CalculatorApp:
         self.resize_after_id = self.root.after(100, self._handle_resized_window)
 
     def _handle_resized_window(self) -> None:
+        """Reflow plugin buttons after the window size changes."""
         self.resize_after_id = None
         if self.body_frame is None or self.keypad_frame is None:
             return
@@ -420,8 +442,12 @@ class CalculatorApp:
             self._apply_theme()
 
     def _save_settings(self) -> None:
+        """Persist the current UI state to the settings file."""
         self.settings.dark_mode = self.dark_mode.get()
         self.settings.live_mode = self.live_mode.get()
+        self.settings.disabled_plugin_ids = sorted(
+            plugin.plugin_id for plugin in self.plugins if plugin.plugin_id not in self.enabled_plugin_ids
+        )
         self.settings.enabled_plugin_ids = sorted(self.enabled_plugin_ids)
         self.settings.maximized = self._is_maximized()
         if not self.settings.maximized:
@@ -433,6 +459,7 @@ class CalculatorApp:
             messagebox.showwarning("Settings", "Unable to save settings.")
 
     def _is_maximized(self) -> bool:
+        """Return whether the root window is currently maximized."""
         try:
             return self.root.state() == "zoomed"
         except tk.TclError:
@@ -444,10 +471,12 @@ class CalculatorApp:
             return False
 
     def on_close(self) -> None:
+        """Persist settings and close the application window."""
         self._save_settings()
         self.root.destroy()
 
     def insert_text(self, value: str) -> None:
+        """Insert *value* at the cursor, replacing any active selection."""
         if self.display is None:
             return
 
@@ -455,6 +484,7 @@ class CalculatorApp:
         self.display.focus_set()
 
     def backspace(self) -> None:
+        """Delete the current selection or the character before the cursor."""
         if self.display is None:
             return
 
@@ -532,15 +562,18 @@ class CalculatorApp:
         self.display.focus_set()
 
     def calculate_result(self) -> None:
+        """Evaluate the current expression and show the formatted result."""
         self._evaluate_into_result(live=False)
 
     def clear(self) -> None:
+        """Clear the entry and result display, then refocus the input."""
         self.expression_var.set("")
         self._clear_result_display()
         if self.display is not None:
             self.display.focus_set()
 
     def _evaluate_into_result(self, live: bool) -> None:
+        """Evaluate the entry contents and update the result field."""
         expression = self.expression_var.get().strip()
         if not expression:
             self._clear_result_display()
@@ -562,16 +595,19 @@ class CalculatorApp:
         self._set_result_display(f"= {format_result(result)}")
 
     def _set_result_display(self, text: str, is_error: bool = False) -> None:
+        """Show *text* in the result field and apply the correct styling."""
         self.result_is_error = is_error
         self.result_var.set(text)
         self._apply_theme()
 
     def _clear_result_display(self) -> None:
+        """Remove any current result or error message from the UI."""
         self.result_is_error = False
         self.result_var.set("")
         self._apply_theme()
 
     def _replace_selection_or_insert(self, value: str) -> None:
+        """Replace the current selection with *value*, or insert at the cursor."""
         if self.display is None:
             return
 
@@ -589,6 +625,7 @@ class CalculatorApp:
         self.display.icursor(selection_start + len(value))
 
     def _delete_selection_if_present(self) -> bool:
+        """Delete the active selection and return whether one existed."""
         if self.display is None:
             return False
 
@@ -603,11 +640,13 @@ class CalculatorApp:
         return True
 
     def _on_return_pressed(self, _: tk.Event[tk.Misc]) -> str:
+        """Evaluate the current expression and suppress Tk's default behavior."""
         self.calculate_result()
         return "break"
 
 
 def run_gui() -> int:
+    """Start the Tkinter GUI and return the process exit code."""
     root = tk.Tk()
 
     try:
@@ -624,7 +663,8 @@ def run_gui() -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Plugin Calculator")
+    """Parse command-line arguments and run the GUI or CLI entry point."""
+    parser = argparse.ArgumentParser(description="Calcforshort: The Extensible Calculator App")
     parser.add_argument("expression", nargs="?", help="Expression to evaluate in CLI mode")
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     args = parser.parse_args(argv)

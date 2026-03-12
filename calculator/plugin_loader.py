@@ -1,3 +1,5 @@
+"""Plugin discovery and normalization for calculator extensions."""
+
 from __future__ import annotations
 
 import importlib
@@ -11,6 +13,8 @@ from calculator.plugin_api import CalcPlugin
 
 @dataclass(frozen=True)
 class LoadedPlugin:
+    """Runtime representation of a discovered calculator plugin."""
+
     plugin_id: str
     label: str
     insert: str
@@ -25,6 +29,7 @@ class LoadedPlugin:
 
 
 def _normalize_registered_plugins(registered: object) -> list[CalcPlugin]:
+    """Normalize a plugin module's register result into a list."""
     if registered is None:
         return []
     if isinstance(registered, list):
@@ -33,6 +38,7 @@ def _normalize_registered_plugins(registered: object) -> list[CalcPlugin]:
 
 
 def _load_plugin_from_module(module: ModuleType) -> list[LoadedPlugin]:
+    """Load and validate plugin definitions exposed by *module*."""
     register = getattr(module, "register", None)
     if register is None:
         return []
@@ -58,6 +64,7 @@ def _load_plugin_from_module(module: ModuleType) -> list[LoadedPlugin]:
 
 
 def load_plugins(package_name: str = "plugins") -> List[LoadedPlugin]:
+    """Discover, load, and sort plugins from *package_name*."""
     package = importlib.import_module(package_name)
     discovered: list[LoadedPlugin] = []
 

@@ -1,1 +1,1 @@
-"""Calculator operator plugins live here."""
+"""Built-in Calcforshort plugins discovered by the application."""

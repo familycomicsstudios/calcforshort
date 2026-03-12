@@ -1,6 +1,6 @@
-# Plugin Calculator
+# Calcforshort: The Extensible Calculator App
 
-Simple Tkinter calculator with plugin-based operators. The GUI behaves like a lightweight expression-entry calculator: you type directly into the input, and the buttons insert text at the cursor. The app also includes a top menu with dark mode and per-plugin enable or disable toggles.
+Calcforshort is a Tkinter calculator with plugin-based syntax buttons and callable extensions. The GUI behaves like a lightweight expression-entry calculator: you type directly into the input, and the buttons insert text at the cursor. The app also includes a top menu with dark mode and per-plugin enable or disable toggles.
 
 ## Run
 
@@ -32,20 +32,29 @@ python app.py --cli
 - You can type directly into the expression field, including with the keyboard.
 - Invalid expressions show `Error: ...` in the result field instead of opening a popup.
 
+## Expression syntax
+
+- `^` is treated as exponentiation, so `2^8` evaluates to `256`.
+- `root(Y)` means the square root of `Y`.
+- `Xroot(Y)` means the `X`th root of `Y`, so `3root(27)` evaluates to `3`.
+- Statements separated by `;` run left to right, so `a=2; b=a; b^3` works.
+- Strings are supported, so `"Hello" + "World"` evaluates to `"HelloWorld"`.
+
 ## Resizing and settings
 
 - The window can be resized or maximized.
 - Buttons stay fixed-size while extra window width is used to fit more plugin buttons across the plugin area.
 - Settings are saved automatically.
-- On Linux and macOS, settings are written to `~/.plugincalculator/settings.json`.
-- On Windows, settings are written to `%APPDATA%\PluginCalculator\settings.json`.
+- On Linux and macOS, settings are written to `~/.calcforshort/settings.json`.
+- On Windows, settings are written to `%APPDATA%\Calcforshort\settings.json`.
+- Existing settings from the older `PluginCalculator` location are still read automatically.
 
 ## Plugin model
 
 Add a module under `plugins/` and expose a `register()` function returning a `CalcPlugin`
 (or a list of them).
 
-**Operator button** — inserts text, no extra function needed:
+**Syntax button** — inserts text, no extra function needed:
 
 ```python
 from calculator.plugin_api import CalcPlugin
@@ -53,6 +62,9 @@ from calculator.plugin_api import CalcPlugin
 def register() -> CalcPlugin:
     return CalcPlugin(label="^", insert=" ** ")
 ```
+
+Built-in examples now include `X^Y` with `insert="^"` and `Xroot(Y)` with
+`insert="root("`.
 
 **Function button** — adds a callable to the expression namespace *and* a button that
 inserts the opening call:
@@ -76,9 +88,9 @@ def register() -> CalcPlugin:
   so users can type `name(...)` directly.
 - `handler` (optional) is the Python callable added to the namespace.
 
-All expressions are evaluated as Python, so standard operators (`+`, `-`, `*`, `/`,
-`**`, `%`, `//`) and all functions in [BASE_NAMESPACE](calculator/expression.py) are
-always available regardless of loaded plugins.
+All expressions are normalized into Python before evaluation. That means the app
+supports standard Python operators (`+`, `-`, `*`, `/`, `**`, `%`, `//`) as well as
+calculator shorthand such as `^` and `Xroot(Y)`.
 
 ## API
 

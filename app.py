@@ -1,3 +1,5 @@
+"""Application entry point for the plugin calculator."""
+
 from calculator.app import main
 
 

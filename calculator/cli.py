@@ -1,3 +1,5 @@
+"""Command-line interface for Calcforshort."""
+
 from __future__ import annotations
 
 import sys
@@ -7,6 +9,7 @@ from calculator.expression import ExpressionError, format_result
 
 
 def run_cli(expression: str | None = None) -> int:
+    """Run the calculator in interactive or one-shot CLI mode."""
     try:
         plugins = get_plugins()
     except Exception as error:
@@ -16,7 +19,7 @@ def run_cli(expression: str | None = None) -> int:
     if expression is not None:
         return _print_calculation(expression, plugins)
 
-    print("Plugin Calculator CLI")
+    print("Calcforshort: The Extensible Calculator App")
     print("Type an expression, or 'quit' to exit.")
     while True:
         try:
@@ -37,6 +40,7 @@ def run_cli(expression: str | None = None) -> int:
 
 
 def _print_calculation(expression: str, plugins: list) -> int:
+    """Evaluate *expression* and print the formatted result to stdout."""
     try:
         result = calculate(expression, plugins=plugins)
     except (ExpressionError, ZeroDivisionError) as error:

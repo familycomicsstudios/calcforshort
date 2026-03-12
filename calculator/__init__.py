@@ -1,4 +1,4 @@
-"""Calculator package."""
+"""Public package interface for the plugin calculator."""
 
 from calculator.api import calculate, get_plugins
 

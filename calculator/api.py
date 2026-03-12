@@ -1,3 +1,5 @@
+"""Public API helpers for evaluating expressions and discovering plugins."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
@@ -8,6 +10,7 @@ from calculator.plugin_loader import LoadedPlugin, load_plugins
 
 
 def get_plugins(package_name: str = "plugins") -> list[LoadedPlugin]:
+    """Return all discovered plugins from *package_name*."""
     return load_plugins(package_name)
 
 
@@ -17,6 +20,7 @@ def calculate(
     enabled_plugin_ids: Iterable[str] | None = None,
     package_name: str = "plugins",
 ) -> Any:
+    """Evaluate *expression* with built-ins and any enabled plugin callables."""
     loaded_plugins = list(plugins) if plugins is not None else load_plugins(package_name)
     enabled_ids = set(enabled_plugin_ids) if enabled_plugin_ids is not None else None
 

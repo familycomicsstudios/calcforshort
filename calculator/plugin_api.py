@@ -1,3 +1,5 @@
+"""Plugin protocol objects exposed to third-party calculator plugins."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
