@@ -143,6 +143,9 @@ class CalculatorApp:
         self.plugin_row_limit = 1
         self.resize_after_id: str | None = None
         self.terminal_namespace: dict[str, object] = {}
+        self.terminal_history: list[str] = []
+        self.terminal_history_index: int | None = None
+        self.terminal_history_draft = ""
         self._terminal_input_start_mark = "terminal_input_start"
 
         self._build_ui()
@@ -265,6 +268,8 @@ class CalculatorApp:
         self.display.bind("<KP_Enter>", self._on_return_pressed)
         self.display.bind("<Shift-Return>", self._on_shift_return_pressed)
         self.display.bind("<Shift-KP_Enter>", self._on_shift_return_pressed)
+        self.display.bind("<Up>", self._on_terminal_history_up)
+        self.display.bind("<Down>", self._on_terminal_history_down)
         self.display.bind("<KeyRelease>", self._on_expression_changed)
         self.display.bind("<ButtonRelease-1>", self._on_expression_changed)
         self.display.tag_configure(TERMINAL_OUTPUT_TAG, justify="right")
@@ -546,9 +551,12 @@ class CalculatorApp:
             return
 
         self.display.delete("1.0", tk.END)
-        self.terminal_namespace = {}
+        self.terminal_namespace = {"ans": 0}
+        self.terminal_history = []
+        self.terminal_history_index = None
+        self.terminal_history_draft = ""
         self._sync_terminal_plugin_namespace()
-        self._set_terminal_input_start()
+        self._append_terminal_prompt()
         self._clear_result_display()
         self.display.focus_set()
 
@@ -560,24 +568,62 @@ class CalculatorApp:
         self.display.mark_gravity(self._terminal_input_start_mark, tk.LEFT)
         self.display.mark_set(tk.INSERT, "end-1c")
 
+    def _append_terminal_prompt(self) -> None:
+        """Start a fresh editable terminal line."""
+        if self.display is None:
+            return
+
+        self._set_terminal_input_start()
+        self.terminal_history_index = None
+        self.terminal_history_draft = ""
+
+    def _get_terminal_input(self) -> str:
+        """Return the current editable terminal input line."""
+        if self.display is None:
+            return ""
+        return self.display.get(self.display.index(self._terminal_input_start_mark), "end-1c")
+
+    def _replace_terminal_input(self, value: str) -> None:
+        """Replace the current editable terminal input line with *value*."""
+        if self.display is None:
+            return
+
+        start = self.display.index(self._terminal_input_start_mark)
+        self.display.delete(start, "end-1c")
+        self.display.insert("end-1c", value)
+        self.display.mark_set(tk.INSERT, "end-1c")
+        self._scroll_equation_caret_into_view()
+
+    def _terminal_move_cursor_to_input_end(self) -> None:
+        """Keep terminal editing anchored to the active input line."""
+        if self.display is None:
+            return
+
+        input_start = self.display.index(self._terminal_input_start_mark)
+        if self.display.compare(tk.INSERT, "<", input_start):
+            self.display.mark_set(tk.INSERT, "end-1c")
+
     def _submit_terminal_line(self) -> None:
         """Execute and evaluate the current terminal line, then append output."""
         if self.display is None:
             return
 
         self.display.mark_set(tk.INSERT, "end-1c")
-        start = self.display.index(self._terminal_input_start_mark)
-        end = self.display.index("end-1c")
-        command = self.display.get(start, end).strip()
+        command = self._get_terminal_input().strip()
 
         self.display.insert("end-1c", "\n")
         if not command:
-            self._set_terminal_input_start()
+            self._append_terminal_prompt()
             self._scroll_equation_caret_into_view()
             return
 
+        self.terminal_history.append(command)
+        self.terminal_history_index = None
+        self.terminal_history_draft = ""
+
         try:
             result = self._evaluate_terminal_command(command)
+            self.terminal_namespace["ans"] = result
             formatted = format_result(result)
             self.display.insert("end-1c", f"{formatted}\n", (TERMINAL_OUTPUT_TAG,))
             self._set_result_display(f"= {formatted}")
@@ -586,11 +632,12 @@ class CalculatorApp:
             self.display.insert("end-1c", f"{message}\n", (TERMINAL_ERROR_TAG,))
             self._set_result_display(message, is_error=True)
 
-        self._set_terminal_input_start()
+        self._append_terminal_prompt()
         self._scroll_equation_caret_into_view()
 
     def _evaluate_terminal_command(self, command: str) -> object:
         """Run one terminal command with persistent namespace state."""
+        command = re.sub(r"\bans\b", "ans", command, flags=re.IGNORECASE)
         plugin_namespace = self._sync_terminal_plugin_namespace()
 
         assignment_match = re.match(r"^\s*([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$", command, re.DOTALL)
@@ -603,6 +650,19 @@ class CalculatorApp:
                 namespace=self.terminal_namespace,
             )
             self.terminal_namespace[variable_name] = value
+            return value
+
+        # Function definitions: f(params) = body  or  def f(params): body
+        func_def_match = re.match(r"^\s*([A-Za-z_]\w*)\s*\([^)]*\)\s*=(?!=)", command, re.DOTALL)
+        def_stmt_match = re.match(r"^\s*def\s+([A-Za-z_]\w*)\s*\(", command)
+        if func_def_match or def_stmt_match:
+            func_name = func_def_match.group(1) if func_def_match else def_stmt_match.group(1)  # type: ignore[union-attr]
+            value = evaluate_expression_string(
+                command,
+                extra_namespace=plugin_namespace,
+                namespace=self.terminal_namespace,
+            )
+            self.terminal_namespace[func_name] = value
             return value
 
         return evaluate_expression_string(
@@ -810,6 +870,9 @@ class CalculatorApp:
         if self.display is None:
             return
 
+        if self.calculator_mode.get() == "terminal":
+            self._terminal_move_cursor_to_input_end()
+
         self._replace_selection_or_insert(value)
         if "\n" in value:
             self._scroll_equation_caret_into_view()
@@ -819,6 +882,9 @@ class CalculatorApp:
         """Delete the current selection or the character before the cursor."""
         if self.display is None:
             return
+
+        if self.calculator_mode.get() == "terminal":
+            self._terminal_move_cursor_to_input_end()
 
         if self._delete_selection_if_present():
             self.display.focus_set()
@@ -842,6 +908,9 @@ class CalculatorApp:
         """
         if self.display is None:
             return
+
+        if self.calculator_mode.get() == "terminal":
+            self._terminal_move_cursor_to_input_end()
 
         text = self._get_expression_text()
         pos = self._cursor_offset()
@@ -995,7 +1064,42 @@ class CalculatorApp:
 
     def _on_shift_return_pressed(self, _: tk.Event[tk.Misc]) -> str:
         """Insert a newline without triggering evaluation."""
+        if self.calculator_mode.get() == "terminal":
+            self._submit_terminal_line()
+            return "break"
         self.insert_text("\n")
+        return "break"
+
+    def _on_terminal_history_up(self, _: tk.Event[tk.Misc]) -> str | None:
+        """Navigate backward through terminal command history."""
+        if self.calculator_mode.get() != "terminal":
+            return None
+        if not self.terminal_history:
+            return "break"
+
+        current_input = self._get_terminal_input()
+        if self.terminal_history_index is None:
+            self.terminal_history_draft = current_input
+            self.terminal_history_index = len(self.terminal_history) - 1
+        elif self.terminal_history_index > 0:
+            self.terminal_history_index -= 1
+
+        self._replace_terminal_input(self.terminal_history[self.terminal_history_index])
+        return "break"
+
+    def _on_terminal_history_down(self, _: tk.Event[tk.Misc]) -> str | None:
+        """Navigate forward through terminal command history."""
+        if self.calculator_mode.get() != "terminal":
+            return None
+        if self.terminal_history_index is None:
+            return "break"
+
+        if self.terminal_history_index < len(self.terminal_history) - 1:
+            self.terminal_history_index += 1
+            self._replace_terminal_input(self.terminal_history[self.terminal_history_index])
+        else:
+            self.terminal_history_index = None
+            self._replace_terminal_input(self.terminal_history_draft)
         return "break"
 
     def _scroll_equation_caret_into_view(self) -> None:

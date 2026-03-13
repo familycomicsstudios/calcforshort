@@ -453,7 +453,11 @@ def _normalize_comparison_syntax(expression: str) -> str:
 
 
 def _maybe_rewrite_func_def(raw_stmt: str) -> tuple[str, str | None]:
-    """Detect ``f(params) = body`` syntax and rewrite it as a lambda assignment.
+    """Detect function definition syntax and prepare it for execution.
+
+    Handles two forms:
+    * ``f(params) = body``  — rewritten to a lambda assignment.
+    * ``def f(params): body`` — passed through as-is for exec.
 
     Returns ``(python_stmt, func_name)`` where *func_name* is not ``None`` when
     a function definition was detected so the caller knows to exec rather than
@@ -466,11 +470,22 @@ def _maybe_rewrite_func_def(raw_stmt: str) -> tuple[str, str | None]:
         body = _normalize_expression_syntax(match.group(3).strip())
         body = _normalize_comparison_syntax(body)
         return f"{name} = lambda {params}: ({body})", name
+
+    def_match = re.match(r"^\s*def\s+([A-Za-z_]\w*)\s*\(", raw_stmt)
+    if def_match:
+        return raw_stmt, def_match.group(1)
+
     return _normalize_expression_syntax(raw_stmt), None
 
 
 def _normalize_expression_syntax(expression: str) -> str:
     """Translate calculator shorthand such as ``^``, ``Xroot(Y)``, and ``logN(X)`` to Python."""
+    # Implicit multiplication: 2x → 2*x, 2(x+1) → 2*(x+1), (x+1)(x-1) → (x+1)*(x-1)
+    # Exclude e/E when used as a scientific-notation exponent (e.g. 1e10 stays intact).
+    expression = re.sub(r'(\d)([A-DF-Za-df-z_(])', r'\1*\2', expression)
+    expression = re.sub(r'(\d)([eE])(?![0-9+\-])', r'\1*\2', expression)
+    expression = re.sub(r'\)([\d(A-Za-z_])', r')*\1', expression)
+
     parts: list[str] = []
     index = 0
     quote: str | None = None
@@ -573,6 +588,7 @@ def evaluate_expression_string(
             "ln": calc_ln,
             "logn": logn,
             "root": root,
+            "sqrt": root,
         }
     )
     if extra_namespace:
