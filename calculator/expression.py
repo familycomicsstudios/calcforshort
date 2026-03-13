@@ -117,6 +117,15 @@ def _snap_trig_output(value: float) -> float:
     return value
 
 
+def _snap_near_integer(value: float) -> float | int:
+    """Return an exact int when *value* is extremely close to one."""
+    if math.isfinite(value):
+        rounded = round(value)
+        if abs(value - rounded) < 1e-12:
+            return int(rounded)
+    return value
+
+
 def trig_sin(value: Any) -> Any:
     """Sine honoring the configured angle mode."""
     result = math.sin(_to_radians(float(value)))
@@ -254,6 +263,21 @@ def root(value: Any, degree: Any = 2) -> Any:
         return _sanitize_result(result)
 
     return _sanitize_result(value ** (1 / degree))
+
+
+def calc_log(value: Any) -> Any:
+    """Return the base-10 logarithm of ``value``."""
+    return _sanitize_result(_snap_near_integer(math.log10(float(value))))
+
+
+def calc_ln(value: Any) -> Any:
+    """Return the natural logarithm of ``value``."""
+    return _sanitize_result(_snap_near_integer(math.log(float(value))))
+
+
+def logn(value: Any, base: Any = 10) -> Any:
+    """Return the logarithm of ``value`` in an arbitrary ``base``."""
+    return _sanitize_result(_snap_near_integer(math.log(float(value), float(base))))
 
 
 class SafeArithmeticTransformer(ast.NodeTransformer):
@@ -446,7 +470,7 @@ def _maybe_rewrite_func_def(raw_stmt: str) -> tuple[str, str | None]:
 
 
 def _normalize_expression_syntax(expression: str) -> str:
-    """Translate calculator shorthand such as ``^`` and ``Xroot(Y)`` to Python."""
+    """Translate calculator shorthand such as ``^``, ``Xroot(Y)``, and ``logN(X)`` to Python."""
     parts: list[str] = []
     index = 0
     quote: str | None = None
@@ -491,6 +515,23 @@ def _normalize_expression_syntax(expression: str) -> str:
             index = close_index + 1
             continue
 
+        if expression.startswith("log", index):
+            base_start = index + 3
+            open_index = expression.find("(", base_start)
+            if open_index != -1:
+                base_text = expression[base_start:open_index].strip()
+                if base_text and re.fullmatch(r"\d+(?:\.\d+)?", base_text):
+                    close_index = _find_matching_close_paren(expression, open_index)
+                    if close_index is None:
+                        parts.append(expression[index:])
+                        break
+
+                    inner = expression[open_index + 1 : close_index]
+                    normalized_inner = _normalize_expression_syntax(inner)
+                    parts.append(f"logn({normalized_inner}, {base_text})")
+                    index = close_index + 1
+                    continue
+
         if char == "^":
             parts.append("**")
             index += 1
@@ -528,6 +569,9 @@ def evaluate_expression_string(
             "safe_floordiv": safe_floordiv,
             "safe_mod": safe_mod,
             "safe_pow": safe_pow,
+            "log": calc_log,
+            "ln": calc_ln,
+            "logn": logn,
             "root": root,
         }
     )

@@ -211,7 +211,7 @@ class CalculatorApp:
             command=self.toggle_calculator_mode,
         )
 
-        for group_key in sorted(self.plugin_groups.keys()):
+        for group_key in self._sorted_plugin_group_keys():
             menu_label = _plugin_group_label(group_key)
             self.plugins_menu.add_checkbutton(
                 label=menu_label,
@@ -371,8 +371,17 @@ class CalculatorApp:
             child.destroy()
 
         enabled_plugins = self._enabled_plugins()
-        visible_plugins = [plugin for plugin in enabled_plugins if plugin.show_button]
-        if not visible_plugins:
+        grouped_visible_plugins: list[tuple[str, list[LoadedPlugin]]] = []
+        for group_key in self._sorted_plugin_group_keys():
+            group_plugins = [
+                plugin
+                for plugin in enabled_plugins
+                if plugin.show_button and _plugin_group_key(plugin) == group_key
+            ]
+            if group_plugins:
+                grouped_visible_plugins.append((group_key, group_plugins))
+
+        if not grouped_visible_plugins:
             placeholder = tk.Label(self.plugin_frame, text="No plugins enabled")
             placeholder.grid(row=0, column=0, padx=BUTTON_PADX, pady=BUTTON_PADY, sticky="w")
             self._apply_theme()
@@ -380,24 +389,27 @@ class CalculatorApp:
 
         row_limit = self._calculate_plugin_row_limit()
         self.plugin_row_limit = row_limit
-        for index, plugin in enumerate(visible_plugins):
-            row_index = index % row_limit
-            column_index = index // row_limit
-            button = tk.Button(
-                self.plugin_frame,
-                text=plugin.label,
-                width=BUTTON_WIDTH,
-                height=BUTTON_HEIGHT,
-                command=self._make_insert_handler(plugin.insert),
-            )
-            button.grid(
-                row=row_index,
-                column=column_index,
-                padx=BUTTON_PADX,
-                pady=BUTTON_PADY,
-            )
-            self.buttons.append(button)
-            self.plugin_buttons.append(button)
+        item_index = 0
+        for group_key, group_plugins in grouped_visible_plugins:
+            for plugin in group_plugins:
+                row_index = item_index % row_limit
+                column_index = item_index // row_limit
+                button = tk.Button(
+                    self.plugin_frame,
+                    text=plugin.label,
+                    width=BUTTON_WIDTH,
+                    height=BUTTON_HEIGHT,
+                    command=self._make_insert_handler(plugin.insert),
+                )
+                button.grid(
+                    row=row_index,
+                    column=column_index,
+                    padx=BUTTON_PADX,
+                    pady=BUTTON_PADY,
+                )
+                self.buttons.append(button)
+                self.plugin_buttons.append(button)
+                item_index += 1
 
     def _calculate_plugin_row_limit(self) -> int:
         """Return max number of plugin-button rows before wrapping to a new column."""
@@ -425,6 +437,23 @@ class CalculatorApp:
     def _enabled_plugins(self) -> list[LoadedPlugin]:
         """Return plugins that are currently enabled in the UI."""
         return [plugin for plugin in self.plugins if plugin.plugin_id in self.enabled_plugin_ids]
+
+    def _sorted_plugin_group_keys(self) -> list[str]:
+        """Return plugin group keys ordered by their simplicity metadata."""
+        group_simplicity: dict[str, int] = {}
+        for plugin in self.plugins:
+            group_key = _plugin_group_key(plugin)
+            current = group_simplicity.get(group_key)
+            if current is None or plugin.plugin_simplicity < current:
+                group_simplicity[group_key] = plugin.plugin_simplicity
+
+        return sorted(
+            self.plugin_groups.keys(),
+            key=lambda group_key: (
+                group_simplicity.get(group_key, 100),
+                _plugin_group_label(group_key),
+            ),
+        )
 
     def _build_plugin_groups(self) -> dict[str, list[str]]:
         """Build a map of group key to plugin IDs for grouped menu toggles."""
@@ -473,12 +502,16 @@ class CalculatorApp:
 
     def toggle_calculator_mode(self) -> None:
         """Switch between evaluation and terminal interaction modes."""
+        self._render_layout()
+        self._apply_theme()
+
         if self.calculator_mode.get() == "terminal":
             self._initialize_terminal_editor()
         else:
-            if self.display is not None:
-                self.display.delete("1.0", tk.END)
-            self._clear_result_display()
+            if self.live_mode.get():
+                self._evaluate_into_result(live=True)
+            else:
+                self._clear_result_display()
         self._save_settings()
 
     def _enabled_plugin_namespace(self) -> dict[str, object]:

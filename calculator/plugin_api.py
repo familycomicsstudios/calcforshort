@@ -26,3 +26,4 @@ class CalcPlugin:
     plugin_version: str = "1.0.0"
     plugin_description: str = ""
     plugin_author: str = ""
+    plugin_simplicity: int = 100

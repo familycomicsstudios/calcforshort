@@ -6,6 +6,7 @@ from calculator.plugin_api import CalcPlugin
 
 def register() -> list[CalcPlugin]:
     """Return grouped plugins for common trig functions."""
+    simplicity = 60
     return [
         CalcPlugin(
             label="sin(",
@@ -16,6 +17,7 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Sine function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
         CalcPlugin(
             label="cos(",
@@ -26,6 +28,7 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Cosine function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
         CalcPlugin(
             label="tan(",
@@ -36,6 +39,7 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Tangent function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
         CalcPlugin(
             label="asin(",
@@ -46,6 +50,7 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Inverse sine function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
         CalcPlugin(
             label="acos(",
@@ -56,6 +61,7 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Inverse cosine function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
         CalcPlugin(
             label="atan(",
@@ -66,5 +72,6 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Inverse tangent function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
     ]

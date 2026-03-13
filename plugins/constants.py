@@ -12,6 +12,7 @@ def register() -> list[CalcPlugin]:
         "plugin_version": "1.0.0",
         "plugin_description": "Provides default constants such as pi and e.",
         "plugin_author": "Calcforshort",
+        "plugin_simplicity": 30,
         "show_button": True,
     }
     return [

@@ -69,6 +69,9 @@ Build artifacts are written to `dist/`.
 - `^` is treated as exponentiation, so `2^8` evaluates to `256`.
 - `root(Y)` means the square root of `Y`.
 - `Xroot(Y)` means the `X`th root of `Y`, so `3root(27)` evaluates to `3`.
+- `log(X)` is base-10 logarithm.
+- `ln(X)` is natural logarithm.
+- `logN(X)` means logarithm of `X` in base `N`, so `log2(8)` evaluates to `3`.
 - Statements separated by `;` run left to right, so `a=2; b=a; b^3` works.
 - Strings are supported, so `"Hello" + "World"` evaluates to `"HelloWorld"`.
 
@@ -91,6 +94,8 @@ Built-in plugins are grouped like this:
 - `plugins/core_arithmetic.py`: `+`, `-`, `*`, `/`
 - `plugins/power_root.py`: `X^Y`, `Xroot(Y)`
 - `plugins/trigonometry.py`: `sin(`, `cos(`, `tan(`, `asin(`, `acos(`, `atan(`
+- `plugins/scientific_logs.py`: `log(`, `ln(`, `logN(X)`
+- `plugins/scientific_general.py`: `factorial(`, `ceil(`, `floor(`, `hypot(`, `comb(`, `perm(`
 - `plugins/constants.py`: namespace constants `pi`, `e`, `tau`, `inf`, `nan`
 
 **Syntax button** — inserts text, no extra function needed:
@@ -128,6 +133,7 @@ def register() -> CalcPlugin:
 - `handler` (optional) is the Python value added to the namespace.
 - `show_button` (optional, default `True`) hides namespace-only plugins from the button grid.
 - `plugin_name`, `plugin_version`, `plugin_description`, `plugin_author` add plugin metadata.
+- `plugin_simplicity` (optional, default `100`) sorts simpler plugin groups ahead of more advanced ones.
 
 All expressions are normalized into Python before evaluation. That means the app
 supports standard Python operators (`+`, `-`, `*`, `/`, `**`, `%`, `//`) as well as

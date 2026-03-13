@@ -6,6 +6,7 @@ from calculator.plugin_api import CalcPlugin
 
 def register() -> list[CalcPlugin]:
     """Return grouped plugins for power and root syntax."""
+    simplicity = 20
     return [
         CalcPlugin(
             label="X^Y",
@@ -14,6 +15,7 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Exponent shorthand operator.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
         CalcPlugin(
             label="Xroot(Y)",
@@ -24,5 +26,6 @@ def register() -> list[CalcPlugin]:
             plugin_version="1.0.0",
             plugin_description="Nth-root helper function.",
             plugin_author="Calcforshort",
+            plugin_simplicity=simplicity,
         ),
     ]

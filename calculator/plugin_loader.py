@@ -25,6 +25,7 @@ class LoadedPlugin:
     plugin_version: str
     plugin_description: str
     plugin_author: str
+    plugin_simplicity: int
 
     def namespace_entry(self) -> tuple[str, Any] | None:
         """Return ``(name, value)`` to add to the eval namespace, or None."""
@@ -68,6 +69,7 @@ def _load_plugin_from_module(module: ModuleType) -> list[LoadedPlugin]:
                 plugin_version=getattr(plugin, "plugin_version", "1.0.0"),
                 plugin_description=getattr(plugin, "plugin_description", ""),
                 plugin_author=getattr(plugin, "plugin_author", ""),
+                plugin_simplicity=int(getattr(plugin, "plugin_simplicity", 100)),
             )
         )
     return plugins
@@ -84,4 +86,7 @@ def load_plugins(package_name: str = "plugins") -> List[LoadedPlugin]:
         module = importlib.import_module(module_info.name)
         discovered.extend(_load_plugin_from_module(module))
 
-    return sorted(discovered, key=lambda p: (p.label, p.name, p.plugin_id))
+    return sorted(
+        discovered,
+        key=lambda p: (p.plugin_simplicity, p.plugin_name.lower(), p.label, p.name, p.plugin_id),
+    )
