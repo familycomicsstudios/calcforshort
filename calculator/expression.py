@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import math
+import re
 import sys
 from typing import Any
 
@@ -59,6 +60,9 @@ BASE_NAMESPACE: dict[str, Any] = {
 # Drop None entries (functions unavailable on older Python)
 BASE_NAMESPACE = {k: v for k, v in BASE_NAMESPACE.items() if v is not None}
 MAX_FLOAT = sys.float_info.max
+# Floats can represent values up to just under 2**max_exp.
+# Any integer power whose result exceeds that many bits is Inf.
+_FLOAT_MAX_EXP: int = sys.float_info.max_exp  # 1024 on all standard platforms
 
 
 class ExpressionError(ValueError):
@@ -86,6 +90,9 @@ def _sanitize_result(value: Any) -> Any:
         return math.nan
 
     if isinstance(value, str):
+        return value
+
+    if callable(value):
         return value
 
     return math.nan
@@ -122,6 +129,15 @@ def safe_mod(left: Any, right: Any) -> Any:
 
 def safe_pow(left: Any, right: Any) -> Any:
     """Raise ``left`` to ``right`` and clamp overflow to infinities or NaN."""
+    # Fast-path: (bit_length(base) - 1) * exp approximates log2 of the result.
+    # When this exceeds _FLOAT_MAX_EXP the result is guaranteed > MAX_FLOAT, so
+    # skip building a potentially multi-million-digit Python integer entirely.
+    if isinstance(left, int) and isinstance(right, int):
+        base_abs = abs(left)
+        if base_abs > 1 and right > 0 and (base_abs.bit_length() - 1) * right > _FLOAT_MAX_EXP:
+            if left < 0 and right % 2 == 1:
+                return -math.inf
+            return math.inf
     try:
         return _sanitize_result(left**right)
     except OverflowError:
@@ -262,6 +278,28 @@ def _find_previous_operand_start(text: str) -> int | None:
     return None
 
 
+_FUNC_DEF_RE = re.compile(
+    r'^([A-Za-z_]\w*)\s*\(([^)]*)\)\s*=(?!=)\s*(.+)$',
+    re.DOTALL,
+)
+
+
+def _maybe_rewrite_func_def(raw_stmt: str) -> tuple[str, str | None]:
+    """Detect ``f(params) = body`` syntax and rewrite it as a lambda assignment.
+
+    Returns ``(python_stmt, func_name)`` where *func_name* is not ``None`` when
+    a function definition was detected so the caller knows to exec rather than
+    eval the statement.
+    """
+    match = _FUNC_DEF_RE.match(raw_stmt)
+    if match:
+        name = match.group(1)
+        params = match.group(2)
+        body = _normalize_expression_syntax(match.group(3).strip())
+        return f"{name} = lambda {params}: ({body})", name
+    return _normalize_expression_syntax(raw_stmt), None
+
+
 def _normalize_expression_syntax(expression: str) -> str:
     """Translate calculator shorthand such as ``^`` and ``Xroot(Y)`` to Python."""
     parts: list[str] = []
@@ -345,11 +383,13 @@ def evaluate_expression_string(
     if extra_namespace:
         namespace.update(extra_namespace)
 
-    parts = [p.strip() for p in expression.split(";")]
-    parts = [_normalize_expression_syntax(p) for p in parts if p]
+    raw_parts = [p.strip() for p in expression.split(";") if p.strip()]
+    processed: list[tuple[str, str | None]] = [
+        _maybe_rewrite_func_def(p) for p in raw_parts
+    ]
 
     # Execute all leading statements so their bindings are in scope.
-    for stmt in parts[:-1]:
+    for stmt, _ in processed[:-1]:
         try:
             exec(_compile_expression(stmt, "exec"), namespace)  # noqa: S102
         except SyntaxError as error:
@@ -358,8 +398,21 @@ def evaluate_expression_string(
         except Exception as error:
             raise ExpressionError(f"Evaluation error: {error}") from error
 
+    last_stmt, func_name = processed[-1]
+
+    if func_name is not None:
+        # Final statement is a function definition: exec it and return the function.
+        try:
+            exec(_compile_expression(last_stmt, "exec"), namespace)  # noqa: S102
+        except SyntaxError as error:
+            msg = getattr(error, "msg", str(error))
+            raise ExpressionError(f"Syntax error: {msg}") from error
+        except Exception as error:
+            raise ExpressionError(f"Evaluation error: {error}") from error
+        return _sanitize_result(namespace.get(func_name))
+
     try:
-        result = eval(_compile_expression(parts[-1], "eval"), namespace)  # noqa: S307
+        result = eval(_compile_expression(last_stmt, "eval"), namespace)  # noqa: S307
     except SyntaxError as error:
         msg = getattr(error, "msg", str(error))
         raise ExpressionError(f"Syntax error: {msg}") from error
@@ -394,4 +447,9 @@ def format_result(value: Any) -> str:
         return str(value)
     if isinstance(value, str):
         return repr(value)
+    if callable(value):
+        name = getattr(value, "__name__", None)
+        if name and name != "<lambda>":
+            return f"<function {name}>"
+        return "<function>"
     return repr(value)
