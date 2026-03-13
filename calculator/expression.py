@@ -667,12 +667,12 @@ def format_result(value: Any) -> str:
             return "NaN"
         if math.isinf(value):
             return "Inf" if value > 0 else "-Inf"
-        try:
-            if value == int(value):
-                return str(int(value))
-        except (ValueError, OverflowError):
-            pass
-        return str(value)
+        rounded_int = round(value)
+        if abs(value) >= 1e-9 and math.isclose(value, rounded_int, rel_tol=0.0, abs_tol=1e-15):
+            return str(int(rounded_int))
+
+        # Limit significant digits to hide binary floating-point noise.
+        return format(value, ".15g")
     if isinstance(value, str):
         return repr(value)
     if callable(value):
