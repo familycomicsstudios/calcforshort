@@ -51,6 +51,8 @@ WINDOW_MIN_WIDTH = 420
 WINDOW_MIN_HEIGHT = 320
 ENTRY_FONT = ("TkFixedFont", 18)
 RESULT_FONT = ("TkDefaultFont", 12)
+EXPRESSION_TEXT_HEIGHT = 3
+RESULT_MIN_HEIGHT = 34
 
 _DIGITS_AND_DOT = frozenset("0123456789.")
 _BINARY_LEFT = frozenset("0123456789.)")
@@ -112,7 +114,6 @@ class CalculatorApp:
         self.angle_mode = tk.StringVar(value=settings.angle_mode)
         set_angle_mode(self.angle_mode.get())
 
-        self.expression_var = tk.StringVar(value="")
         self.result_var = tk.StringVar(value="")
         self.result_is_error = False
         self.frame: tk.Frame | None = None
@@ -120,7 +121,8 @@ class CalculatorApp:
         self.keypad_frame: tk.Frame | None = None
         self.plugin_frame: tk.Frame | None = None
         self.controls_frame: tk.Frame | None = None
-        self.display: tk.Entry | None = None
+        self.display: tk.Text | None = None
+        self.display_scrollbar: tk.Scrollbar | None = None
         self.result_display: tk.Entry | None = None
         self.buttons: list[tk.Button] = []
         self.plugin_buttons: list[tk.Button] = []
@@ -135,7 +137,6 @@ class CalculatorApp:
         self._apply_saved_window_state()
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.expression_var.trace_add("write", self._on_expression_changed)
 
     def _apply_window_icon(self) -> None:
         """Apply app icons from the project root if available."""
@@ -203,19 +204,36 @@ class CalculatorApp:
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
         self.frame.grid_columnconfigure(0, weight=1)
-        self.frame.grid_rowconfigure(1, weight=1)
+        self.frame.grid_columnconfigure(1, weight=0)
+        # Keep the answer row visible with a minimum height. The equation row
+        # is allowed to shrink first when the window gets short.
+        self.frame.grid_rowconfigure(0, weight=1, minsize=0)
+        self.frame.grid_rowconfigure(1, weight=0, minsize=RESULT_MIN_HEIGHT)
+        self.frame.grid_rowconfigure(2, weight=0)
+        self.frame.grid_rowconfigure(3, weight=1)
         self.buttons = []
         self.plugin_buttons = []
 
-        self.display = tk.Entry(
+        self.display = tk.Text(
             self.frame,
-            textvariable=self.expression_var,
-            justify="right",
             font=ENTRY_FONT,
+            height=EXPRESSION_TEXT_HEIGHT,
+            wrap="word",
+            undo=True,
         )
-        self.display.grid(row=0, column=0, pady=(0, 10), sticky="ew")
+        self.display.grid(row=0, column=0, pady=(0, 10), sticky="nsew")
+
+        self.display_scrollbar = tk.Scrollbar(self.frame, orient="vertical")
+        self.display_scrollbar.grid(row=0, column=1, pady=(0, 10), sticky="ns")
+        self.display.configure(yscrollcommand=self.display_scrollbar.set)
+        self.display_scrollbar.configure(command=self.display.yview)
+
         self.display.bind("<Return>", self._on_return_pressed)
         self.display.bind("<KP_Enter>", self._on_return_pressed)
+        self.display.bind("<Shift-Return>", self._on_shift_return_pressed)
+        self.display.bind("<Shift-KP_Enter>", self._on_shift_return_pressed)
+        self.display.bind("<KeyRelease>", self._on_expression_changed)
+        self.display.bind("<ButtonRelease-1>", self._on_expression_changed)
 
         self.result_display = tk.Entry(
             self.frame,
@@ -225,10 +243,10 @@ class CalculatorApp:
             state="readonly",
             relief="sunken",
         )
-        self.result_display.grid(row=1, column=0, pady=(0, 10), sticky="ew")
+        self.result_display.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
 
         self.controls_frame = tk.Frame(self.frame)
-        self.controls_frame.grid(row=2, column=0, pady=(0, 10), sticky="w")
+        self.controls_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10), sticky="w")
 
         control_buttons = [
             ("(", lambda: self.insert_text("(")),
@@ -248,7 +266,7 @@ class CalculatorApp:
             self.buttons.append(button)
 
         self.body_frame = tk.Frame(self.frame)
-        self.body_frame.grid(row=3, column=0, sticky="nw")
+        self.body_frame.grid(row=3, column=0, columnspan=2, sticky="nw")
 
         self.keypad_frame = tk.Frame(self.body_frame)
         self.keypad_frame.grid(row=0, column=0, sticky="nw")
@@ -486,6 +504,12 @@ class CalculatorApp:
                 fg=theme["display_fg"],
                 insertbackground=theme["display_fg"],
             )
+        if self.display_scrollbar is not None:
+            self.display_scrollbar.configure(
+                background=theme["button_bg"],
+                activebackground=theme["button_active_bg"],
+                troughcolor=theme["panel_bg"],
+            )
         if self.result_display is not None:
             self.result_display.configure(
                 readonlybackground=theme["display_bg"],
@@ -582,6 +606,8 @@ class CalculatorApp:
             return
 
         self._replace_selection_or_insert(value)
+        if "\n" in value:
+            self._scroll_equation_caret_into_view()
         self.display.focus_set()
 
     def backspace(self) -> None:
@@ -593,11 +619,13 @@ class CalculatorApp:
             self.display.focus_set()
             return
 
-        insert_at = self.display.index(tk.INSERT)
+        insert_at = self._cursor_offset()
         if insert_at <= 0:
             return
 
-        self.display.delete(insert_at - 1)
+        self._delete_by_offset(insert_at - 1, insert_at)
+        self._set_cursor_offset(insert_at - 1)
+        self._on_expression_changed()
         self.display.focus_set()
 
     def negate(self) -> None:
@@ -610,8 +638,8 @@ class CalculatorApp:
         if self.display is None:
             return
 
-        text = self.display.get()
-        pos = self.display.index(tk.INSERT)
+        text = self._get_expression_text()
+        pos = self._cursor_offset()
 
         # ── Case 1: cursor right after a numeric literal ──────────────────────
         num_start = pos
@@ -629,13 +657,14 @@ class CalculatorApp:
             )
             if already_negated:
                 # Remove the wrapping "-(" and ")"
-                self.display.delete(pos)           # delete ")" first (higher index)
-                self.display.delete(num_start - 2, num_start)  # delete "-("
-                self.display.icursor(num_start - 2 + len(token))
+                self._delete_by_offset(pos, pos + 1)
+                self._delete_by_offset(num_start - 2, num_start)
+                self._set_cursor_offset(num_start - 2 + len(token))
             else:
-                self.display.delete(num_start, pos)
-                self.display.insert(num_start, f"-({token})")
-                self.display.icursor(num_start + len(token) + 3)
+                self._delete_by_offset(num_start, pos)
+                self._insert_by_offset(num_start, f"-({token})")
+                self._set_cursor_offset(num_start + len(token) + 3)
+            self._on_expression_changed()
             self.display.focus_set()
             return
 
@@ -650,11 +679,12 @@ class CalculatorApp:
                     and (match_pos < 2 or text[match_pos - 2] not in _BINARY_LEFT)
                 )
                 if is_unary_neg:
-                    self.display.delete(match_pos - 1)
-                    self.display.icursor(pos - 1)
+                    self._delete_by_offset(match_pos - 1, match_pos)
+                    self._set_cursor_offset(pos - 1)
                 else:
-                    self.display.insert(match_pos, "-")
-                    self.display.icursor(pos + 1)
+                    self._insert_by_offset(match_pos, "-")
+                    self._set_cursor_offset(pos + 1)
+                self._on_expression_changed()
             self.display.focus_set()
             return
 
@@ -668,14 +698,15 @@ class CalculatorApp:
 
     def clear(self) -> None:
         """Clear the entry and result display, then refocus the input."""
-        self.expression_var.set("")
+        if self.display is not None:
+            self.display.delete("1.0", tk.END)
         self._clear_result_display()
         if self.display is not None:
             self.display.focus_set()
 
     def _evaluate_into_result(self, live: bool) -> None:
         """Evaluate the entry contents and update the result field."""
-        expression = self.expression_var.get().strip()
+        expression = self._get_expression_text().strip()
         if not expression:
             self._clear_result_display()
             return
@@ -718,12 +749,14 @@ class CalculatorApp:
         except tk.TclError:
             insert_at = self.display.index(tk.INSERT)
             self.display.insert(insert_at, value)
-            self.display.icursor(insert_at + len(value))
+            self.display.mark_set(tk.INSERT, f"{insert_at}+{len(value)}c")
+            self._on_expression_changed()
             return
 
         self.display.delete(selection_start, selection_end)
         self.display.insert(selection_start, value)
-        self.display.icursor(selection_start + len(value))
+        self.display.mark_set(tk.INSERT, f"{selection_start}+{len(value)}c")
+        self._on_expression_changed()
 
     def _delete_selection_if_present(self) -> bool:
         """Delete the active selection and return whether one existed."""
@@ -737,13 +770,63 @@ class CalculatorApp:
             return False
 
         self.display.delete(selection_start, selection_end)
-        self.display.icursor(selection_start)
+        self.display.mark_set(tk.INSERT, selection_start)
+        self._on_expression_changed()
         return True
 
     def _on_return_pressed(self, _: tk.Event[tk.Misc]) -> str:
         """Evaluate the current expression and suppress Tk's default behavior."""
         self.calculate_result()
         return "break"
+
+    def _on_shift_return_pressed(self, _: tk.Event[tk.Misc]) -> str:
+        """Insert a newline without triggering evaluation."""
+        self.insert_text("\n")
+        return "break"
+
+    def _scroll_equation_caret_into_view(self) -> None:
+        """Scroll the equation editor so the insertion cursor remains visible."""
+        if self.display is None:
+            return
+        self.display.after_idle(lambda: self.display is not None and self.display.see(tk.INSERT))
+
+    def _get_expression_text(self) -> str:
+        """Return the full expression text from the multiline input."""
+        if self.display is None:
+            return ""
+        return self.display.get("1.0", "end-1c")
+
+    def _offset_to_index(self, offset: int) -> str:
+        """Convert a character offset into a Tk text index."""
+        safe_offset = max(0, offset)
+        return f"1.0+{safe_offset}c"
+
+    def _cursor_offset(self) -> int:
+        """Return cursor position as a character offset from ``1.0``."""
+        if self.display is None:
+            return 0
+        count = self.display.count("1.0", tk.INSERT, "chars")
+        if not count:
+            return 0
+        return int(count[0])
+
+    def _set_cursor_offset(self, offset: int) -> None:
+        """Set cursor position using a character offset."""
+        if self.display is None:
+            return
+        self.display.mark_set(tk.INSERT, self._offset_to_index(offset))
+
+    def _delete_by_offset(self, start: int, end: int) -> None:
+        """Delete a text range expressed in character offsets."""
+        if self.display is None:
+            return
+        self.display.delete(self._offset_to_index(start), self._offset_to_index(end))
+
+    def _insert_by_offset(self, offset: int, value: str) -> None:
+        """Insert text at a character offset."""
+        if self.display is None:
+            return
+        self.display.insert(self._offset_to_index(offset), value)
 
 
 def run_gui() -> int:

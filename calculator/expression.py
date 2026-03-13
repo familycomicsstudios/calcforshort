@@ -512,6 +512,9 @@ def evaluate_expression_string(
     assignments (``exec``), the last is evaluated as an expression.
     Plugins can inject additional callables via *extra_namespace*.
     """
+    expression = expression.replace("\r\n", "\n").replace("\r", "\n")
+    expression = expression.replace("\n", ";")
+
     if not expression.strip():
         raise ExpressionError("Enter an expression before calculating.")
 
