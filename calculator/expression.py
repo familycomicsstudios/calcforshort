@@ -21,9 +21,43 @@ BASE_NAMESPACE: dict[str, Any] = {
     "round": round,
     "int": int,
     "float": float,
+    "bool": bool,
+    "str": str,
+    "list": list,
+    "tuple": tuple,
+    "dict": dict,
+    "set": set,
+    "frozenset": frozenset,
+    "len": len,
+    "range": range,
     "min": min,
     "max": max,
     "sum": sum,
+    "any": any,
+    "all": all,
+    "sorted": sorted,
+    "reversed": reversed,
+    "zip": zip,
+    "map": map,
+    "filter": filter,
+    "enumerate": enumerate,
+    "tuple": tuple,
+    "dict": dict,
+    "set": set,
+    "frozenset": frozenset,
+    "len": len,
+    "range": range,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "any": any,
+    "all": all,
+    "sorted": sorted,
+    "reversed": reversed,
+    "zip": zip,
+    "map": map,
+    "filter": filter,
+    "enumerate": enumerate,
     "pow": pow,
     # algebra / general
     "sqrt": math.sqrt,
@@ -146,7 +180,8 @@ def _sanitize_result(value: Any) -> Any:
     if callable(value):
         return value
 
-    return math.nan
+    # Pass through collections, None, and any other type unchanged.
+    return value
 
 
 def safe_div(left: Any, right: Any) -> Any:
@@ -334,6 +369,64 @@ _FUNC_DEF_RE = re.compile(
     re.DOTALL,
 )
 
+# Characters that, when immediately preceding ``=``, indicate the ``=`` is
+# part of a compound operator (``==``, ``!=``, ``<=``, ``>=``, ``+=``,
+# ``-=``, ``*=``, ``/=``, ``**=``, ``//=``, ``%=``, ``&=``, ``|=``,
+# ``^=``, ``@=``, ``:=``) and must NOT be rewritten to ``==``.
+_EQ_PREFIX_EXCLUDED: frozenset[str] = frozenset("!<>=+-*/%&|^:@~")
+
+
+def _normalize_comparison_syntax(expression: str) -> str:
+    """Rewrite a bare ``=`` (comparison intent) to ``==``.
+
+    Processes the string character-by-character so that ``=`` inside string
+    literals and all compound operators are left unchanged.  Only called on
+    the final *eval* expression, never on exec statements.
+    """
+    parts: list[str] = []
+    index = 0
+    quote: str | None = None
+    escaped = False
+    prev_char = ""
+
+    while index < len(expression):
+        char = expression[index]
+
+        if quote is not None:
+            parts.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            prev_char = char
+            index += 1
+            continue
+
+        if char in {'"', "'"}:
+            quote = char
+            parts.append(char)
+            prev_char = char
+            index += 1
+            continue
+
+        if char == "=":
+            next_char = expression[index + 1] if index + 1 < len(expression) else ""
+            if prev_char not in _EQ_PREFIX_EXCLUDED and next_char != "=":
+                parts.append("==")
+            else:
+                parts.append("=")
+            prev_char = char
+            index += 1
+            continue
+
+        parts.append(char)
+        prev_char = char
+        index += 1
+
+    return "".join(parts)
+
 
 def _maybe_rewrite_func_def(raw_stmt: str) -> tuple[str, str | None]:
     """Detect ``f(params) = body`` syntax and rewrite it as a lambda assignment.
@@ -347,6 +440,7 @@ def _maybe_rewrite_func_def(raw_stmt: str) -> tuple[str, str | None]:
         name = match.group(1)
         params = match.group(2)
         body = _normalize_expression_syntax(match.group(3).strip())
+        body = _normalize_comparison_syntax(body)
         return f"{name} = lambda {params}: ({body})", name
     return _normalize_expression_syntax(raw_stmt), None
 
@@ -462,19 +556,36 @@ def evaluate_expression_string(
             raise ExpressionError(f"Evaluation error: {error}") from error
         return _sanitize_result(namespace.get(func_name))
 
+    def _eval_stmt(stmt: str) -> Any:
+        """Compile and evaluate *stmt*, raising ExpressionError on any failure."""
+        try:
+            return eval(_compile_expression(stmt, "eval"), namespace)  # noqa: S307
+        except SyntaxError as error:
+            raise error  # re-raise so the outer try can handle it
+        except NameError as error:
+            raise ExpressionError(str(error)) from error
+        except TypeError as error:
+            raise ExpressionError(str(error)) from error
+        except (ArithmeticError, ValueError) as error:
+            raise ExpressionError(str(error)) from error
+        except Exception as error:
+            raise ExpressionError(f"Evaluation error: {error}") from error
+
     try:
-        result = eval(_compile_expression(last_stmt, "eval"), namespace)  # noqa: S307
-    except SyntaxError as error:
-        msg = getattr(error, "msg", str(error))
-        raise ExpressionError(f"Syntax error: {msg}") from error
-    except NameError as error:
-        raise ExpressionError(str(error)) from error
-    except TypeError as error:
-        raise ExpressionError(str(error)) from error
-    except (ArithmeticError, ValueError) as error:
-        raise ExpressionError(str(error)) from error
-    except Exception as error:
-        raise ExpressionError(f"Evaluation error: {error}") from error
+        result = _eval_stmt(last_stmt)
+    except SyntaxError as original_error:
+        # The user may have written ``5=5`` intending a comparison.  Try
+        # rewriting single ``=`` to ``==`` before giving up.
+        normalized = _normalize_comparison_syntax(last_stmt)
+        if normalized != last_stmt:
+            try:
+                result = _eval_stmt(normalized)
+            except SyntaxError:
+                msg = getattr(original_error, "msg", str(original_error))
+                raise ExpressionError(f"Syntax error: {msg}") from original_error
+        else:
+            msg = getattr(original_error, "msg", str(original_error))
+            raise ExpressionError(f"Syntax error: {msg}") from original_error
 
     return _sanitize_result(result)
 
