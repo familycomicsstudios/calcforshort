@@ -16,6 +16,37 @@ python app.py --cli "(2 + 3) * 4"
 python app.py --cli
 ```
 
+## Build Executables
+
+Install PyInstaller first:
+
+```bash
+python -m pip install pyinstaller
+```
+
+Build a native executable for your current OS:
+
+```bash
+python build.py
+```
+
+Useful variants:
+
+```bash
+python build.py --target native      # explicit native build
+python build.py --onedir             # folder output instead of one-file
+python build.py --target windows     # on Windows host, builds Windows .exe
+python build.py --target all         # native + Windows (Windows host)
+```
+
+From Linux, you can attempt a Windows build via Docker:
+
+```bash
+python build.py --target windows --windows-via-docker
+```
+
+Build artifacts are written to `dist/`.
+
 ## Menus
 
 - `Settings -> Dark mode` switches the calculator between light and dark themes.
