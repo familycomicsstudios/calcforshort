@@ -46,6 +46,7 @@ BUTTON_PADX = 4
 BUTTON_PADY = 4
 PLUGIN_COLUMN_WIDTH = 88
 PLUGIN_MIN_COLUMNS = 2
+PLUGIN_ROW_HEIGHT = 50
 WINDOW_MIN_WIDTH = 420
 WINDOW_MIN_HEIGHT = 320
 ENTRY_FONT = ("TkFixedFont", 18)
@@ -127,7 +128,7 @@ class CalculatorApp:
         self.settings_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.angle_mode_menu = tk.Menu(self.settings_menu, tearoff=0)
         self.plugins_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.plugin_column_count = PLUGIN_MIN_COLUMNS
+        self.plugin_row_limit = 1
         self.resize_after_id: str | None = None
 
         self._build_ui()
@@ -323,10 +324,11 @@ class CalculatorApp:
             self._apply_theme()
             return
 
-        column_count = min(self.plugin_column_count, max(1, len(visible_plugins)))
+        row_limit = self._calculate_plugin_row_limit()
+        self.plugin_row_limit = row_limit
         for index, plugin in enumerate(visible_plugins):
-            row_index = index // column_count
-            column_index = index % column_count
+            row_index = index % row_limit
+            column_index = index // row_limit
             button = tk.Button(
                 self.plugin_frame,
                 text=plugin.label,
@@ -342,6 +344,25 @@ class CalculatorApp:
             )
             self.buttons.append(button)
             self.plugin_buttons.append(button)
+
+    def _calculate_plugin_row_limit(self) -> int:
+        """Return max number of plugin-button rows before wrapping to a new column."""
+        if self.plugin_frame is None or self.body_frame is None:
+            return 1
+
+        self.root.update_idletasks()
+
+        # Wrap based on actual available height inside the current window,
+        # not the screen height, so shrinking the window cannot push buttons
+        # below the bottom edge.
+        available_height = max(PLUGIN_ROW_HEIGHT, self.body_frame.winfo_height() - 4)
+
+        sample_button_height = next(
+            (button.winfo_reqheight() for button in self.buttons if isinstance(button, tk.Button)),
+            BUTTON_HEIGHT * 18,
+        )
+        row_pitch = max(PLUGIN_ROW_HEIGHT, sample_button_height + (BUTTON_PADY * 2))
+        return max(1, available_height // row_pitch)
 
     def _make_insert_handler(self, value: str) -> Callable[[], None]:
         """Return a button command that inserts *value* into the entry."""
@@ -512,14 +533,12 @@ class CalculatorApp:
     def _handle_resized_window(self) -> None:
         """Reflow plugin buttons after the window size changes."""
         self.resize_after_id = None
-        if self.body_frame is None or self.keypad_frame is None:
+        if self.body_frame is None or self.plugin_frame is None:
             return
 
-        self.root.update_idletasks()
-        available_width = self.body_frame.winfo_width() - self.keypad_frame.winfo_width() - 12
-        calculated_columns = max(PLUGIN_MIN_COLUMNS, available_width // PLUGIN_COLUMN_WIDTH)
-        if calculated_columns != self.plugin_column_count:
-            self.plugin_column_count = calculated_columns
+        calculated_rows = self._calculate_plugin_row_limit()
+        if calculated_rows != self.plugin_row_limit:
+            self.plugin_row_limit = calculated_rows
             self._render_plugin_buttons()
             self._apply_theme()
 
