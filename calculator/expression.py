@@ -25,19 +25,6 @@ BASE_NAMESPACE: dict[str, Any] = {
     "max": max,
     "sum": sum,
     "pow": pow,
-    # trigonometry
-    "sin": math.sin,
-    "cos": math.cos,
-    "tan": math.tan,
-    "asin": math.asin,
-    "acos": math.acos,
-    "atan": math.atan,
-    "atan2": math.atan2,
-    "sinh": math.sinh,
-    "cosh": math.cosh,
-    "tanh": math.tanh,
-    "degrees": math.degrees,
-    "radians": math.radians,
     # algebra / general
     "sqrt": math.sqrt,
     "log": math.log,
@@ -50,12 +37,6 @@ BASE_NAMESPACE: dict[str, Any] = {
     "gcd": math.gcd,
     "lcm": getattr(math, "lcm", None),  # Python 3.9+
     "hypot": math.hypot,
-    # constants
-    "pi": math.pi,
-    "e": math.e,
-    "tau": math.tau,
-    "inf": math.inf,
-    "nan": math.nan,
 }
 # Drop None entries (functions unavailable on older Python)
 BASE_NAMESPACE = {k: v for k, v in BASE_NAMESPACE.items() if v is not None}
@@ -63,6 +44,76 @@ MAX_FLOAT = sys.float_info.max
 # Floats can represent values up to just under 2**max_exp.
 # Any integer power whose result exceeds that many bits is Inf.
 _FLOAT_MAX_EXP: int = sys.float_info.max_exp  # 1024 on all standard platforms
+_ANGLE_MODE = "radian"
+
+
+def set_angle_mode(mode: str) -> None:
+    """Set trig angle mode to ``radian`` or ``degree``."""
+    normalized = mode.strip().lower()
+    if normalized not in {"radian", "degree"}:
+        raise ValueError("Angle mode must be 'radian' or 'degree'.")
+    global _ANGLE_MODE
+    _ANGLE_MODE = normalized
+
+
+def get_angle_mode() -> str:
+    """Return the currently configured trig angle mode."""
+    return _ANGLE_MODE
+
+
+def _to_radians(value: float) -> float:
+    """Convert an input angle to radians when degree mode is active."""
+    return math.radians(value) if _ANGLE_MODE == "degree" else value
+
+
+def _from_radians(value: float) -> float:
+    """Convert a radian output angle to current mode units."""
+    return math.degrees(value) if _ANGLE_MODE == "degree" else value
+
+
+def _snap_trig_output(value: float) -> float:
+    """Snap tiny floating-point trig noise to expected canonical values."""
+    epsilon = 1e-12
+    if abs(value) < epsilon:
+        return 0.0
+    if abs(value - 1.0) < epsilon:
+        return 1.0
+    if abs(value + 1.0) < epsilon:
+        return -1.0
+    return value
+
+
+def trig_sin(value: Any) -> Any:
+    """Sine honoring the configured angle mode."""
+    result = math.sin(_to_radians(float(value)))
+    return _sanitize_result(_snap_trig_output(result))
+
+
+def trig_cos(value: Any) -> Any:
+    """Cosine honoring the configured angle mode."""
+    result = math.cos(_to_radians(float(value)))
+    return _sanitize_result(_snap_trig_output(result))
+
+
+def trig_tan(value: Any) -> Any:
+    """Tangent honoring the configured angle mode."""
+    result = math.tan(_to_radians(float(value)))
+    return _sanitize_result(_snap_trig_output(result))
+
+
+def trig_asin(value: Any) -> Any:
+    """Inverse sine honoring the configured angle mode."""
+    return _sanitize_result(_from_radians(math.asin(float(value))))
+
+
+def trig_acos(value: Any) -> Any:
+    """Inverse cosine honoring the configured angle mode."""
+    return _sanitize_result(_from_radians(math.acos(float(value))))
+
+
+def trig_atan(value: Any) -> Any:
+    """Inverse tangent honoring the configured angle mode."""
+    return _sanitize_result(_from_radians(math.atan(float(value))))
 
 
 class ExpressionError(ValueError):

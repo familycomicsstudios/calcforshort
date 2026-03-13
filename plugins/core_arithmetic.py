@@ -1,0 +1,41 @@
+"""Built-in plugin group for the four core arithmetic operators."""
+
+from calculator.plugin_api import CalcPlugin
+
+
+def register() -> list[CalcPlugin]:
+    """Return plugins for +, -, *, and /."""
+    return [
+        CalcPlugin(
+            label="+",
+            insert=" + ",
+            plugin_name="Core Arithmetic",
+            plugin_version="1.0.0",
+            plugin_description="Addition operator.",
+            plugin_author="Calcforshort",
+        ),
+        CalcPlugin(
+            label="-",
+            insert=" - ",
+            plugin_name="Core Arithmetic",
+            plugin_version="1.0.0",
+            plugin_description="Subtraction operator.",
+            plugin_author="Calcforshort",
+        ),
+        CalcPlugin(
+            label="*",
+            insert=" * ",
+            plugin_name="Core Arithmetic",
+            plugin_version="1.0.0",
+            plugin_description="Multiplication operator.",
+            plugin_author="Calcforshort",
+        ),
+        CalcPlugin(
+            label="/",
+            insert=" / ",
+            plugin_name="Core Arithmetic",
+            plugin_version="1.0.0",
+            plugin_description="Division operator.",
+            plugin_author="Calcforshort",
+        ),
+    ]

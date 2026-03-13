@@ -6,7 +6,7 @@ import importlib
 import pkgutil
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, Callable, List
+from typing import Any, List
 
 from calculator.plugin_api import CalcPlugin
 
@@ -19,10 +19,15 @@ class LoadedPlugin:
     label: str
     insert: str
     name: str
-    handler: Callable[..., Any] | None
+    handler: Any | None
+    show_button: bool
+    plugin_name: str
+    plugin_version: str
+    plugin_description: str
+    plugin_author: str
 
-    def namespace_entry(self) -> tuple[str, Callable[..., Any]] | None:
-        """Return (name, callable) to add to the eval namespace, or None."""
+    def namespace_entry(self) -> tuple[str, Any] | None:
+        """Return ``(name, value)`` to add to the eval namespace, or None."""
         if self.name and self.handler is not None:
             return (self.name, self.handler)
         return None
@@ -58,6 +63,11 @@ def _load_plugin_from_module(module: ModuleType) -> list[LoadedPlugin]:
                 insert=plugin.insert,
                 name=getattr(plugin, "name", ""),
                 handler=getattr(plugin, "handler", None),
+                show_button=bool(getattr(plugin, "show_button", True)),
+                plugin_name=getattr(plugin, "plugin_name", module.__name__.rsplit(".", 1)[-1]),
+                plugin_version=getattr(plugin, "plugin_version", "1.0.0"),
+                plugin_description=getattr(plugin, "plugin_description", ""),
+                plugin_author=getattr(plugin, "plugin_author", ""),
             )
         )
     return plugins

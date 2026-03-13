@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox
 from typing import Callable, Sequence
 
 from calculator.api import calculate
 from calculator.cli import run_cli
-from calculator.expression import ExpressionError, format_result
+from calculator.expression import ExpressionError, format_result, set_angle_mode
 from calculator.plugin_loader import LoadedPlugin, load_plugins
 from calculator.settings import AppSettings, load_settings, save_settings
 
@@ -52,6 +53,9 @@ RESULT_FONT = ("TkDefaultFont", 12)
 
 _DIGITS_AND_DOT = frozenset("0123456789.")
 _BINARY_LEFT = frozenset("0123456789.)")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_ICON_PNG = _PROJECT_ROOT / "Calc For Short.png"
+_ICON_ICO = _PROJECT_ROOT / "Calc For Short.ico"
 
 
 def _find_matching_open_paren(text: str, close_index: int) -> int | None:
@@ -67,12 +71,25 @@ def _find_matching_open_paren(text: str, close_index: int) -> int | None:
     return None
 
 
+def _plugin_group_key(plugin: LoadedPlugin) -> str:
+    """Return the group key derived from a plugin's module path."""
+    module_name = plugin.plugin_id.split(":", 1)[0]
+    return module_name.rsplit(".", 1)[-1]
+
+
+def _plugin_group_label(group_key: str) -> str:
+    """Return a human-friendly group label for menu display."""
+    return group_key.replace("_", " ").title()
+
+
 class CalculatorApp:
     """Own the calculator window, widgets, theming, and user interactions."""
 
     def __init__(self, root: tk.Tk, plugins: list[LoadedPlugin], settings: AppSettings) -> None:
         self.root = root
         self.root.title("Calcforshort: The Extensible Calculator App")
+        self._icon_photo: tk.PhotoImage | None = None
+        self._apply_window_icon()
         self.root.resizable(True, True)
         self.root.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
 
@@ -80,21 +97,19 @@ class CalculatorApp:
         self.settings = settings
         all_plugin_ids = {plugin.plugin_id for plugin in plugins}
         disabled_from_settings = set(settings.disabled_plugin_ids)
-        enabled_from_settings = set(settings.enabled_plugin_ids)
-        if disabled_from_settings:
-            self.enabled_plugin_ids = all_plugin_ids - disabled_from_settings
-        elif enabled_from_settings:
-            self.enabled_plugin_ids = {
-                plugin.plugin_id for plugin in plugins if plugin.plugin_id in enabled_from_settings
-            }
-        else:
-            self.enabled_plugin_ids = all_plugin_ids
-        self.plugin_enabled_vars = {
-            plugin.plugin_id: tk.BooleanVar(value=plugin.plugin_id in self.enabled_plugin_ids)
-            for plugin in plugins
+        self.enabled_plugin_ids = all_plugin_ids - disabled_from_settings
+        self.plugin_groups = self._build_plugin_groups()
+        self.group_enabled_vars = {
+            group_key: tk.BooleanVar(
+                value=bool(plugin_ids)
+                and all(plugin_id in self.enabled_plugin_ids for plugin_id in plugin_ids)
+            )
+            for group_key, plugin_ids in self.plugin_groups.items()
         }
         self.dark_mode = tk.BooleanVar(value=settings.dark_mode)
         self.live_mode = tk.BooleanVar(value=settings.live_mode)
+        self.angle_mode = tk.StringVar(value=settings.angle_mode)
+        set_angle_mode(self.angle_mode.get())
 
         self.expression_var = tk.StringVar(value="")
         self.result_var = tk.StringVar(value="")
@@ -110,6 +125,7 @@ class CalculatorApp:
         self.plugin_buttons: list[tk.Button] = []
         self.menu_bar = tk.Menu(self.root)
         self.settings_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.angle_mode_menu = tk.Menu(self.settings_menu, tearoff=0)
         self.plugins_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.plugin_column_count = PLUGIN_MIN_COLUMNS
         self.resize_after_id: str | None = None
@@ -119,6 +135,22 @@ class CalculatorApp:
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.expression_var.trace_add("write", self._on_expression_changed)
+
+    def _apply_window_icon(self) -> None:
+        """Apply app icons from the project root if available."""
+        if _ICON_PNG.exists():
+            try:
+                # Keep a reference to avoid Tk garbage-collecting the icon image.
+                self._icon_photo = tk.PhotoImage(file=str(_ICON_PNG))
+                self.root.iconphoto(True, self._icon_photo)
+            except tk.TclError:
+                pass
+
+        if _ICON_ICO.exists():
+            try:
+                self.root.iconbitmap(str(_ICON_ICO))
+            except tk.TclError:
+                pass
 
     def _build_ui(self) -> None:
         """Create the menu bar and the initial window layout."""
@@ -134,14 +166,27 @@ class CalculatorApp:
             variable=self.live_mode,
             command=self.toggle_live_mode,
         )
+        self.settings_menu.add_cascade(label="Angle Mode", menu=self.angle_mode_menu)
+        self.angle_mode_menu.add_radiobutton(
+            label="Radians",
+            value="radian",
+            variable=self.angle_mode,
+            command=self.toggle_angle_mode,
+        )
+        self.angle_mode_menu.add_radiobutton(
+            label="Degrees",
+            value="degree",
+            variable=self.angle_mode,
+            command=self.toggle_angle_mode,
+        )
         self.menu_bar.add_cascade(label="Plugins", menu=self.plugins_menu)
 
-        for plugin in self.plugins:
-            _menu_label = plugin.name if plugin.name else plugin.label
+        for group_key in sorted(self.plugin_groups.keys()):
+            menu_label = _plugin_group_label(group_key)
             self.plugins_menu.add_checkbutton(
-                label=_menu_label,
-                variable=self.plugin_enabled_vars[plugin.plugin_id],
-                command=lambda plugin_id=plugin.plugin_id: self.toggle_plugin(plugin_id),
+                label=menu_label,
+                variable=self.group_enabled_vars[group_key],
+                command=lambda current_group=group_key: self.toggle_plugin_group(current_group),
             )
 
         self._render_layout()
@@ -271,14 +316,15 @@ class CalculatorApp:
             child.destroy()
 
         enabled_plugins = self._enabled_plugins()
-        if not enabled_plugins:
+        visible_plugins = [plugin for plugin in enabled_plugins if plugin.show_button]
+        if not visible_plugins:
             placeholder = tk.Label(self.plugin_frame, text="No plugins enabled")
             placeholder.grid(row=0, column=0, padx=BUTTON_PADX, pady=BUTTON_PADY, sticky="w")
             self._apply_theme()
             return
 
-        column_count = min(self.plugin_column_count, max(1, len(enabled_plugins)))
-        for index, plugin in enumerate(enabled_plugins):
+        column_count = min(self.plugin_column_count, max(1, len(visible_plugins)))
+        for index, plugin in enumerate(visible_plugins):
             row_index = index // column_count
             column_index = index % column_count
             button = tk.Button(
@@ -305,6 +351,23 @@ class CalculatorApp:
         """Return plugins that are currently enabled in the UI."""
         return [plugin for plugin in self.plugins if plugin.plugin_id in self.enabled_plugin_ids]
 
+    def _build_plugin_groups(self) -> dict[str, list[str]]:
+        """Build a map of group key to plugin IDs for grouped menu toggles."""
+        groups: dict[str, list[str]] = {}
+        for plugin in self.plugins:
+            group_key = _plugin_group_key(plugin)
+            groups.setdefault(group_key, []).append(plugin.plugin_id)
+        return groups
+
+    def _sync_group_enabled_vars(self) -> None:
+        """Refresh group menu check states from current enabled plugin IDs."""
+        for group_key, plugin_ids in self.plugin_groups.items():
+            is_group_enabled = bool(plugin_ids) and all(
+                plugin_id in self.enabled_plugin_ids for plugin_id in plugin_ids
+            )
+            if group_key in self.group_enabled_vars:
+                self.group_enabled_vars[group_key].set(is_group_enabled)
+
     def _on_expression_changed(self, *_: object) -> None:
         """Refresh the result display after entry edits in live mode."""
         if self.live_mode.get():
@@ -326,12 +389,24 @@ class CalculatorApp:
             self._clear_result_display()
         self._save_settings()
 
-    def toggle_plugin(self, plugin_id: str) -> None:
-        """Enable or disable a plugin button and callable by *plugin_id*."""
-        if self.plugin_enabled_vars[plugin_id].get():
-            self.enabled_plugin_ids.add(plugin_id)
+    def toggle_angle_mode(self) -> None:
+        """Switch trig calculations between radian and degree modes."""
+        set_angle_mode(self.angle_mode.get())
+        if self.live_mode.get():
+            self._evaluate_into_result(live=True)
         else:
-            self.enabled_plugin_ids.discard(plugin_id)
+            self._clear_result_display()
+        self._save_settings()
+
+    def toggle_plugin_group(self, group_key: str) -> None:
+        """Enable or disable all plugins belonging to *group_key*."""
+        group_plugin_ids = self.plugin_groups.get(group_key, [])
+        if self.group_enabled_vars[group_key].get():
+            self.enabled_plugin_ids.update(group_plugin_ids)
+        else:
+            self.enabled_plugin_ids.difference_update(group_plugin_ids)
+
+        self._sync_group_enabled_vars()
 
         self._render_layout()
         self._apply_theme()
@@ -353,6 +428,13 @@ class CalculatorApp:
             activeforeground=theme["button_fg"],
         )
         self.settings_menu.configure(
+            background=theme["menu_bg"],
+            foreground=theme["menu_fg"],
+            activebackground=theme["button_active_bg"],
+            activeforeground=theme["button_fg"],
+            selectcolor=theme["panel_bg"],
+        )
+        self.angle_mode_menu.configure(
             background=theme["menu_bg"],
             foreground=theme["menu_fg"],
             activebackground=theme["button_active_bg"],
@@ -445,10 +527,10 @@ class CalculatorApp:
         """Persist the current UI state to the settings file."""
         self.settings.dark_mode = self.dark_mode.get()
         self.settings.live_mode = self.live_mode.get()
+        self.settings.angle_mode = self.angle_mode.get()
         self.settings.disabled_plugin_ids = sorted(
             plugin.plugin_id for plugin in self.plugins if plugin.plugin_id not in self.enabled_plugin_ids
         )
-        self.settings.enabled_plugin_ids = sorted(self.enabled_plugin_ids)
         self.settings.maximized = self._is_maximized()
         if not self.settings.maximized:
             self.settings.window_geometry = self.root.geometry()

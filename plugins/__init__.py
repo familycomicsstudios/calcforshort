@@ -1,1 +1,1 @@
-"""Built-in Calcforshort plugins discovered by the application."""
+"""Built-in Calcforshort plugin groups discovered by the application."""

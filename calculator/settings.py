@@ -20,8 +20,8 @@ class AppSettings:
 
     dark_mode: bool = False
     live_mode: bool = False
+    angle_mode: str = "radian"
     disabled_plugin_ids: list[str] = field(default_factory=list)
-    enabled_plugin_ids: list[str] = field(default_factory=list)
     window_geometry: str | None = None
     maximized: bool = False
 
@@ -64,8 +64,10 @@ def load_settings() -> AppSettings:
     return AppSettings(
         dark_mode=bool(raw_data.get("dark_mode", False)),
         live_mode=bool(raw_data.get("live_mode", False)),
+        angle_mode=str(raw_data.get("angle_mode", "radian")).lower()
+        if str(raw_data.get("angle_mode", "radian")).lower() in {"radian", "degree"}
+        else "radian",
         disabled_plugin_ids=list(raw_data.get("disabled_plugin_ids", [])),
-        enabled_plugin_ids=list(raw_data.get("enabled_plugin_ids", [])),
         window_geometry=raw_data.get("window_geometry"),
         maximized=bool(raw_data.get("maximized", False)),
     )

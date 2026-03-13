@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
@@ -14,10 +14,15 @@ class CalcPlugin:
     insert:  Text inserted into the expression when the button is clicked.
     name:    Identifier used in expressions (e.g. ``sin``). Leave empty for
              pure operator/syntax buttons that rely on Python operators.
-    handler: Python callable added to the eval namespace under ``name``.
+    handler: Object added to the eval namespace under ``name`` (callable or value).
     """
 
     label: str
     insert: str
     name: str = ""
-    handler: Callable[..., Any] | None = None
+    handler: Any | None = None
+    show_button: bool = True
+    plugin_name: str = ""
+    plugin_version: str = "1.0.0"
+    plugin_description: str = ""
+    plugin_author: str = ""

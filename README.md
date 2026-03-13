@@ -20,6 +20,7 @@ python app.py --cli
 
 - `Settings -> Dark mode` switches the calculator between light and dark themes.
 - `Settings -> Live Mode` evaluates the current expression while you type.
+- `Settings -> Angle Mode` switches trig functions between radians and degrees.
 - `Plugins` lets you enable or disable operator plugins at runtime.
 
 ## Default controls
@@ -54,13 +55,20 @@ python app.py --cli
 Add a module under `plugins/` and expose a `register()` function returning a `CalcPlugin`
 (or a list of them).
 
+Built-in plugins are grouped like this:
+
+- `plugins/core_arithmetic.py`: `+`, `-`, `*`, `/`
+- `plugins/power_root.py`: `X^Y`, `Xroot(Y)`
+- `plugins/trigonometry.py`: `sin(`, `cos(`, `tan(`, `asin(`, `acos(`, `atan(`
+- `plugins/constants.py`: namespace constants `pi`, `e`, `tau`, `inf`, `nan`
+
 **Syntax button** — inserts text, no extra function needed:
 
 ```python
 from calculator.plugin_api import CalcPlugin
 
 def register() -> CalcPlugin:
-    return CalcPlugin(label="^", insert=" ** ")
+    return CalcPlugin(label="^", insert="^")
 ```
 
 Built-in examples now include `X^Y` with `insert="^"` and `Xroot(Y)` with
@@ -86,7 +94,9 @@ def register() -> CalcPlugin:
 - `insert` is the text inserted when the button is clicked.
 - `name` (optional) registers the callable under that identifier in the evaluator,
   so users can type `name(...)` directly.
-- `handler` (optional) is the Python callable added to the namespace.
+- `handler` (optional) is the Python value added to the namespace.
+- `show_button` (optional, default `True`) hides namespace-only plugins from the button grid.
+- `plugin_name`, `plugin_version`, `plugin_description`, `plugin_author` add plugin metadata.
 
 All expressions are normalized into Python before evaluation. That means the app
 supports standard Python operators (`+`, `-`, `*`, `/`, `**`, `%`, `//`) as well as
