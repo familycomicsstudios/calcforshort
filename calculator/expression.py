@@ -505,12 +505,14 @@ def _normalize_expression_syntax(expression: str) -> str:
 def evaluate_expression_string(
     expression: str,
     extra_namespace: dict[str, Any] | None = None,
+    namespace: dict[str, Any] | None = None,
 ) -> Any:
     """Evaluate an expression string using Python eval.
 
     Semicolons separate statements: all but the last are executed as
     assignments (``exec``), the last is evaluated as an expression.
     Plugins can inject additional callables via *extra_namespace*.
+    If *namespace* is provided, it is reused and mutated by evaluation.
     """
     expression = expression.replace("\r\n", "\n").replace("\r", "\n")
     expression = expression.replace("\n", ";")
@@ -518,8 +520,9 @@ def evaluate_expression_string(
     if not expression.strip():
         raise ExpressionError("Enter an expression before calculating.")
 
-    namespace: dict[str, Any] = dict(BASE_NAMESPACE)
-    namespace.update(
+    runtime_namespace: dict[str, Any] = namespace if namespace is not None else dict(BASE_NAMESPACE)
+    runtime_namespace.setdefault("__builtins__", {})
+    runtime_namespace.update(
         {
             "safe_div": safe_div,
             "safe_floordiv": safe_floordiv,
@@ -529,7 +532,7 @@ def evaluate_expression_string(
         }
     )
     if extra_namespace:
-        namespace.update(extra_namespace)
+        runtime_namespace.update(extra_namespace)
 
     raw_parts = [p.strip() for p in expression.split(";") if p.strip()]
     processed: list[tuple[str, str | None]] = [
@@ -539,7 +542,7 @@ def evaluate_expression_string(
     # Execute all leading statements so their bindings are in scope.
     for stmt, _ in processed[:-1]:
         try:
-            exec(_compile_expression(stmt, "exec"), namespace)  # noqa: S102
+            exec(_compile_expression(stmt, "exec"), runtime_namespace)  # noqa: S102
         except SyntaxError as error:
             msg = getattr(error, "msg", str(error))
             raise ExpressionError(f"Syntax error: {msg}") from error
@@ -551,18 +554,18 @@ def evaluate_expression_string(
     if func_name is not None:
         # Final statement is a function definition: exec it and return the function.
         try:
-            exec(_compile_expression(last_stmt, "exec"), namespace)  # noqa: S102
+            exec(_compile_expression(last_stmt, "exec"), runtime_namespace)  # noqa: S102
         except SyntaxError as error:
             msg = getattr(error, "msg", str(error))
             raise ExpressionError(f"Syntax error: {msg}") from error
         except Exception as error:
             raise ExpressionError(f"Evaluation error: {error}") from error
-        return _sanitize_result(namespace.get(func_name))
+        return _sanitize_result(runtime_namespace.get(func_name))
 
     def _eval_stmt(stmt: str) -> Any:
         """Compile and evaluate *stmt*, raising ExpressionError on any failure."""
         try:
-            return eval(_compile_expression(stmt, "eval"), namespace)  # noqa: S307
+            return eval(_compile_expression(stmt, "eval"), runtime_namespace)  # noqa: S307
         except SyntaxError as error:
             raise error  # re-raise so the outer try can handle it
         except NameError as error:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -11,7 +12,12 @@ from typing import Callable, Sequence
 
 from calculator.api import calculate
 from calculator.cli import run_cli
-from calculator.expression import ExpressionError, format_result, set_angle_mode
+from calculator.expression import (
+    ExpressionError,
+    evaluate_expression_string,
+    format_result,
+    set_angle_mode,
+)
 from calculator.plugin_loader import LoadedPlugin, load_plugins
 from calculator.settings import AppSettings, load_settings, save_settings
 
@@ -53,6 +59,8 @@ ENTRY_FONT = ("TkFixedFont", 18)
 RESULT_FONT = ("TkDefaultFont", 12)
 EXPRESSION_TEXT_HEIGHT = 3
 RESULT_MIN_HEIGHT = 34
+TERMINAL_OUTPUT_TAG = "terminal_output"
+TERMINAL_ERROR_TAG = "terminal_error"
 
 _DIGITS_AND_DOT = frozenset("0123456789.")
 _BINARY_LEFT = frozenset("0123456789.)")
@@ -111,6 +119,7 @@ class CalculatorApp:
         }
         self.dark_mode = tk.BooleanVar(value=settings.dark_mode)
         self.live_mode = tk.BooleanVar(value=settings.live_mode)
+        self.calculator_mode = tk.StringVar(value=settings.calculator_mode)
         self.angle_mode = tk.StringVar(value=settings.angle_mode)
         set_angle_mode(self.angle_mode.get())
 
@@ -128,12 +137,17 @@ class CalculatorApp:
         self.plugin_buttons: list[tk.Button] = []
         self.menu_bar = tk.Menu(self.root)
         self.settings_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.mode_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.angle_mode_menu = tk.Menu(self.settings_menu, tearoff=0)
         self.plugins_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.plugin_row_limit = 1
         self.resize_after_id: str | None = None
+        self.terminal_namespace: dict[str, object] = {}
+        self._terminal_input_start_mark = "terminal_input_start"
 
         self._build_ui()
+        if self.calculator_mode.get() == "terminal":
+            self._initialize_terminal_editor()
         self._apply_saved_window_state()
         self.root.bind("<Configure>", self._on_root_configure)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -182,6 +196,20 @@ class CalculatorApp:
             command=self.toggle_angle_mode,
         )
         self.menu_bar.add_cascade(label="Plugins", menu=self.plugins_menu)
+        self.menu_bar.add_cascade(label="Mode", menu=self.mode_menu)
+
+        self.mode_menu.add_radiobutton(
+            label="Evaluation",
+            value="evaluation",
+            variable=self.calculator_mode,
+            command=self.toggle_calculator_mode,
+        )
+        self.mode_menu.add_radiobutton(
+            label="Terminal",
+            value="terminal",
+            variable=self.calculator_mode,
+            command=self.toggle_calculator_mode,
+        )
 
         for group_key in sorted(self.plugin_groups.keys()):
             menu_label = _plugin_group_label(group_key)
@@ -199,6 +227,11 @@ class CalculatorApp:
         if self.frame is not None:
             self.frame.destroy()
 
+        is_terminal_mode = self.calculator_mode.get() == "terminal"
+        result_row_minsize = 0 if is_terminal_mode else RESULT_MIN_HEIGHT
+        controls_row = 1 if is_terminal_mode else 2
+        body_row = 2 if is_terminal_mode else 3
+
         self.frame = tk.Frame(self.root, padx=12, pady=12)
         self.frame.grid(row=0, column=0, sticky="nsew")
         self.root.grid_rowconfigure(0, weight=1)
@@ -208,9 +241,9 @@ class CalculatorApp:
         # Keep the answer row visible with a minimum height. The equation row
         # is allowed to shrink first when the window gets short.
         self.frame.grid_rowconfigure(0, weight=1, minsize=0)
-        self.frame.grid_rowconfigure(1, weight=0, minsize=RESULT_MIN_HEIGHT)
+        self.frame.grid_rowconfigure(1, weight=0, minsize=result_row_minsize)
         self.frame.grid_rowconfigure(2, weight=0)
-        self.frame.grid_rowconfigure(3, weight=1)
+        self.frame.grid_rowconfigure(3, weight=0 if is_terminal_mode else 1)
         self.buttons = []
         self.plugin_buttons = []
 
@@ -234,6 +267,8 @@ class CalculatorApp:
         self.display.bind("<Shift-KP_Enter>", self._on_shift_return_pressed)
         self.display.bind("<KeyRelease>", self._on_expression_changed)
         self.display.bind("<ButtonRelease-1>", self._on_expression_changed)
+        self.display.tag_configure(TERMINAL_OUTPUT_TAG, justify="right")
+        self.display.tag_configure(TERMINAL_ERROR_TAG, justify="right")
 
         self.result_display = tk.Entry(
             self.frame,
@@ -243,10 +278,11 @@ class CalculatorApp:
             state="readonly",
             relief="sunken",
         )
-        self.result_display.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
+        if not is_terminal_mode:
+            self.result_display.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
 
         self.controls_frame = tk.Frame(self.frame)
-        self.controls_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10), sticky="w")
+        self.controls_frame.grid(row=controls_row, column=0, columnspan=2, pady=(0, 10), sticky="w")
 
         control_buttons = [
             ("(", lambda: self.insert_text("(")),
@@ -266,7 +302,7 @@ class CalculatorApp:
             self.buttons.append(button)
 
         self.body_frame = tk.Frame(self.frame)
-        self.body_frame.grid(row=3, column=0, columnspan=2, sticky="nw")
+        self.body_frame.grid(row=body_row, column=0, columnspan=2, sticky="nw")
 
         self.keypad_frame = tk.Frame(self.body_frame)
         self.keypad_frame.grid(row=0, column=0, sticky="nw")
@@ -409,6 +445,9 @@ class CalculatorApp:
 
     def _on_expression_changed(self, *_: object) -> None:
         """Refresh the result display after entry edits in live mode."""
+        if self.calculator_mode.get() == "terminal":
+            return
+
         if self.live_mode.get():
             self._evaluate_into_result(live=True)
             return
@@ -422,11 +461,122 @@ class CalculatorApp:
 
     def toggle_live_mode(self) -> None:
         """Enable or disable automatic evaluation while typing."""
+        if self.calculator_mode.get() == "terminal":
+            self._save_settings()
+            return
+
         if self.live_mode.get():
             self._evaluate_into_result(live=True)
         else:
             self._clear_result_display()
         self._save_settings()
+
+    def toggle_calculator_mode(self) -> None:
+        """Switch between evaluation and terminal interaction modes."""
+        if self.calculator_mode.get() == "terminal":
+            self._initialize_terminal_editor()
+        else:
+            if self.display is not None:
+                self.display.delete("1.0", tk.END)
+            self._clear_result_display()
+        self._save_settings()
+
+    def _enabled_plugin_namespace(self) -> dict[str, object]:
+        """Return callable/value namespace entries from enabled plugins."""
+        plugin_namespace: dict[str, object] = {}
+        for plugin in self._enabled_plugins():
+            namespace_entry = plugin.namespace_entry()
+            if namespace_entry is None:
+                continue
+            name, handler = namespace_entry
+            plugin_namespace[name] = handler
+        return plugin_namespace
+
+    def _sync_terminal_plugin_namespace(self) -> dict[str, object]:
+        """Refresh plugin symbols in the persistent terminal namespace."""
+        plugin_namespace = self._enabled_plugin_namespace()
+
+        # Remove all plugin-provided names, then add currently enabled ones.
+        for plugin in self.plugins:
+            namespace_entry = plugin.namespace_entry()
+            if namespace_entry is None:
+                continue
+            name, _ = namespace_entry
+            self.terminal_namespace.pop(name, None)
+
+        self.terminal_namespace.update(plugin_namespace)
+        return plugin_namespace
+
+    def _initialize_terminal_editor(self) -> None:
+        """Reset the equation editor to terminal mode and clear prior session state."""
+        if self.display is None:
+            return
+
+        self.display.delete("1.0", tk.END)
+        self.terminal_namespace = {}
+        self._sync_terminal_plugin_namespace()
+        self._set_terminal_input_start()
+        self._clear_result_display()
+        self.display.focus_set()
+
+    def _set_terminal_input_start(self) -> None:
+        """Mark where the editable terminal input region begins."""
+        if self.display is None:
+            return
+        self.display.mark_set(self._terminal_input_start_mark, "end-1c")
+        self.display.mark_gravity(self._terminal_input_start_mark, tk.LEFT)
+        self.display.mark_set(tk.INSERT, "end-1c")
+
+    def _submit_terminal_line(self) -> None:
+        """Execute and evaluate the current terminal line, then append output."""
+        if self.display is None:
+            return
+
+        self.display.mark_set(tk.INSERT, "end-1c")
+        start = self.display.index(self._terminal_input_start_mark)
+        end = self.display.index("end-1c")
+        command = self.display.get(start, end).strip()
+
+        self.display.insert("end-1c", "\n")
+        if not command:
+            self._set_terminal_input_start()
+            self._scroll_equation_caret_into_view()
+            return
+
+        try:
+            result = self._evaluate_terminal_command(command)
+            formatted = format_result(result)
+            self.display.insert("end-1c", f"{formatted}\n", (TERMINAL_OUTPUT_TAG,))
+            self._set_result_display(f"= {formatted}")
+        except ExpressionError as error:
+            message = f"Error: {error}"
+            self.display.insert("end-1c", f"{message}\n", (TERMINAL_ERROR_TAG,))
+            self._set_result_display(message, is_error=True)
+
+        self._set_terminal_input_start()
+        self._scroll_equation_caret_into_view()
+
+    def _evaluate_terminal_command(self, command: str) -> object:
+        """Run one terminal command with persistent namespace state."""
+        plugin_namespace = self._sync_terminal_plugin_namespace()
+
+        assignment_match = re.match(r"^\s*([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$", command, re.DOTALL)
+        if assignment_match:
+            variable_name = assignment_match.group(1)
+            rhs = assignment_match.group(2).strip()
+            value = evaluate_expression_string(
+                rhs,
+                extra_namespace=plugin_namespace,
+                namespace=self.terminal_namespace,
+            )
+            self.terminal_namespace[variable_name] = value
+            return value
+
+        return evaluate_expression_string(
+            command,
+            extra_namespace=plugin_namespace,
+            namespace=self.terminal_namespace,
+        )
 
     def toggle_angle_mode(self) -> None:
         """Switch trig calculations between radian and degree modes."""
@@ -449,6 +599,10 @@ class CalculatorApp:
 
         self._render_layout()
         self._apply_theme()
+        if self.calculator_mode.get() == "terminal":
+            self._sync_terminal_plugin_namespace()
+            self._save_settings()
+            return
         if self.live_mode.get():
             self._evaluate_into_result(live=True)
         else:
@@ -487,6 +641,13 @@ class CalculatorApp:
             activeforeground=theme["button_fg"],
             selectcolor=theme["panel_bg"],
         )
+        self.mode_menu.configure(
+            background=theme["menu_bg"],
+            foreground=theme["menu_fg"],
+            activebackground=theme["button_active_bg"],
+            activeforeground=theme["button_fg"],
+            selectcolor=theme["panel_bg"],
+        )
 
         if self.frame is not None:
             self.frame.configure(bg=theme["panel_bg"])
@@ -503,6 +664,16 @@ class CalculatorApp:
                 bg=theme["display_bg"],
                 fg=theme["display_fg"],
                 insertbackground=theme["display_fg"],
+            )
+            self.display.tag_configure(
+                TERMINAL_OUTPUT_TAG,
+                foreground=theme["display_fg"],
+                justify="right",
+            )
+            self.display.tag_configure(
+                TERMINAL_ERROR_TAG,
+                foreground="#c0392b",
+                justify="right",
             )
         if self.display_scrollbar is not None:
             self.display_scrollbar.configure(
@@ -570,6 +741,7 @@ class CalculatorApp:
         """Persist the current UI state to the settings file."""
         self.settings.dark_mode = self.dark_mode.get()
         self.settings.live_mode = self.live_mode.get()
+        self.settings.calculator_mode = self.calculator_mode.get()
         self.settings.angle_mode = self.angle_mode.get()
         self.settings.disabled_plugin_ids = sorted(
             plugin.plugin_id for plugin in self.plugins if plugin.plugin_id not in self.enabled_plugin_ids
@@ -694,6 +866,9 @@ class CalculatorApp:
 
     def calculate_result(self) -> None:
         """Evaluate the current expression and show the formatted result."""
+        if self.calculator_mode.get() == "terminal":
+            self._submit_terminal_line()
+            return
         self._evaluate_into_result(live=False)
 
     def clear(self) -> None:
@@ -706,6 +881,9 @@ class CalculatorApp:
 
     def _evaluate_into_result(self, live: bool) -> None:
         """Evaluate the entry contents and update the result field."""
+        if self.calculator_mode.get() == "terminal":
+            return
+
         expression = self._get_expression_text().strip()
         if not expression:
             self._clear_result_display()
@@ -776,6 +954,9 @@ class CalculatorApp:
 
     def _on_return_pressed(self, _: tk.Event[tk.Misc]) -> str:
         """Evaluate the current expression and suppress Tk's default behavior."""
+        if self.calculator_mode.get() == "terminal":
+            self._submit_terminal_line()
+            return "break"
         self.calculate_result()
         return "break"
 

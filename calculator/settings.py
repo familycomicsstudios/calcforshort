@@ -20,6 +20,7 @@ class AppSettings:
 
     dark_mode: bool = False
     live_mode: bool = True
+    calculator_mode: str = "evaluation"
     angle_mode: str = "radian"
     disabled_plugin_ids: list[str] = field(default_factory=list)
     window_geometry: str | None = None
@@ -64,6 +65,9 @@ def load_settings() -> AppSettings:
     return AppSettings(
         dark_mode=bool(raw_data.get("dark_mode", False)),
         live_mode=bool(raw_data.get("live_mode", True)),
+        calculator_mode=str(raw_data.get("calculator_mode", "evaluation")).lower()
+        if str(raw_data.get("calculator_mode", "evaluation")).lower() in {"evaluation", "terminal"}
+        else "evaluation",
         angle_mode=str(raw_data.get("angle_mode", "radian")).lower()
         if str(raw_data.get("angle_mode", "radian")).lower() in {"radian", "degree"}
         else "radian",
