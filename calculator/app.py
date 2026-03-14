@@ -17,6 +17,7 @@ from calculator.expression import (
     evaluate_expression_string,
     format_result,
     set_angle_mode,
+    set_single_letter_variables,
 )
 from calculator.plugin_loader import LoadedPlugin, load_plugins
 from calculator.settings import AppSettings, load_settings, save_settings
@@ -121,7 +122,9 @@ class CalculatorApp:
         self.live_mode = tk.BooleanVar(value=settings.live_mode)
         self.calculator_mode = tk.StringVar(value=settings.calculator_mode)
         self.angle_mode = tk.StringVar(value=settings.angle_mode)
+        self.single_letter_variables = tk.BooleanVar(value=settings.single_letter_variables)
         set_angle_mode(self.angle_mode.get())
+        set_single_letter_variables(self.single_letter_variables.get())
 
         self.result_var = tk.StringVar(value="")
         self.result_is_error = False
@@ -184,6 +187,11 @@ class CalculatorApp:
             label="Live Mode",
             variable=self.live_mode,
             command=self.toggle_live_mode,
+        )
+        self.settings_menu.add_checkbutton(
+            label="Single Letter Variables",
+            variable=self.single_letter_variables,
+            command=self.toggle_single_letter_variables,
         )
         self.settings_menu.add_cascade(label="Angle Mode", menu=self.angle_mode_menu)
         self.angle_mode_menu.add_radiobutton(
@@ -519,6 +527,15 @@ class CalculatorApp:
                 self._clear_result_display()
         self._save_settings()
 
+    def toggle_single_letter_variables(self) -> None:
+        """Enable or disable single-letter variable parsing in expressions."""
+        set_single_letter_variables(self.single_letter_variables.get())
+
+        if self.calculator_mode.get() != "terminal" and self.live_mode.get():
+            self._evaluate_into_result(live=True)
+
+        self._save_settings()
+
     def _enabled_plugin_namespace(self) -> dict[str, object]:
         """Return callable/value namespace entries from enabled plugins."""
         plugin_namespace: dict[str, object] = {}
@@ -836,6 +853,7 @@ class CalculatorApp:
         self.settings.live_mode = self.live_mode.get()
         self.settings.calculator_mode = self.calculator_mode.get()
         self.settings.angle_mode = self.angle_mode.get()
+        self.settings.single_letter_variables = self.single_letter_variables.get()
         self.settings.disabled_plugin_ids = sorted(
             plugin.plugin_id for plugin in self.plugins if plugin.plugin_id not in self.enabled_plugin_ids
         )

@@ -22,6 +22,7 @@ class AppSettings:
     live_mode: bool = True
     calculator_mode: str = "evaluation"
     angle_mode: str = "radian"
+    single_letter_variables: bool = False
     disabled_plugin_ids: list[str] = field(default_factory=list)
     window_geometry: str | None = None
     maximized: bool = False
@@ -71,6 +72,7 @@ def load_settings() -> AppSettings:
         angle_mode=str(raw_data.get("angle_mode", "radian")).lower()
         if str(raw_data.get("angle_mode", "radian")).lower() in {"radian", "degree"}
         else "radian",
+        single_letter_variables=bool(raw_data.get("single_letter_variables", False)),
         disabled_plugin_ids=list(raw_data.get("disabled_plugin_ids", [])),
         window_geometry=raw_data.get("window_geometry"),
         maximized=bool(raw_data.get("maximized", False)),

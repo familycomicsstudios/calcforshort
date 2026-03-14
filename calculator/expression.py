@@ -79,6 +79,7 @@ MAX_FLOAT = sys.float_info.max
 # Any integer power whose result exceeds that many bits is Inf.
 _FLOAT_MAX_EXP: int = sys.float_info.max_exp  # 1024 on all standard platforms
 _ANGLE_MODE = "radian"
+_SINGLE_LETTER_VARIABLES = False
 
 
 def set_angle_mode(mode: str) -> None:
@@ -93,6 +94,12 @@ def set_angle_mode(mode: str) -> None:
 def get_angle_mode() -> str:
     """Return the currently configured trig angle mode."""
     return _ANGLE_MODE
+
+
+def set_single_letter_variables(enabled: bool) -> None:
+    """Control whether adjacent letters are parsed as multiplied variables."""
+    global _SINGLE_LETTER_VARIABLES
+    _SINGLE_LETTER_VARIABLES = bool(enabled)
 
 
 def _to_radians(value: float) -> float:
@@ -546,6 +553,23 @@ def _normalize_expression_syntax(expression: str) -> str:
                     parts.append(f"logn({normalized_inner}, {base_text})")
                     index = close_index + 1
                     continue
+
+        if _SINGLE_LETTER_VARIABLES and char.isalpha():
+            token_start = index
+            while index < len(expression) and expression[index].isalpha():
+                index += 1
+            token = expression[token_start:index]
+
+            next_index = index
+            while next_index < len(expression) and expression[next_index].isspace():
+                next_index += 1
+            is_function_call = next_index < len(expression) and expression[next_index] == "("
+
+            if len(token) > 1 and not is_function_call and token.lower() != "ans":
+                parts.append("*".join(token))
+            else:
+                parts.append(token)
+            continue
 
         if char == "^":
             parts.append("**")
