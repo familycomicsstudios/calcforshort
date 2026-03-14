@@ -7,7 +7,7 @@ import re
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 from typing import Callable, Sequence
 
 from calculator.api import calculate
@@ -220,6 +220,15 @@ class CalculatorApp:
             value="terminal",
             variable=self.calculator_mode,
             command=self.toggle_calculator_mode,
+        )
+        self.mode_menu.add_separator()
+        self.mode_menu.add_command(
+            label="Save Terminal History...",
+            command=self.save_terminal_history,
+        )
+        self.mode_menu.add_command(
+            label="Load and Run Terminal History...",
+            command=self.load_terminal_history,
         )
 
         for group_key in self._sorted_plugin_group_keys():
@@ -526,6 +535,81 @@ class CalculatorApp:
             else:
                 self._clear_result_display()
         self._save_settings()
+
+    def save_terminal_history(self) -> None:
+        """Save executed terminal commands to a history file."""
+        if self.calculator_mode.get() != "terminal":
+            messagebox.showinfo("Terminal History", "Switch to Terminal mode to save history.")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Save Terminal History",
+            defaultextension=".cfs_history",
+            filetypes=[
+                ("Calcforshort history", "*.cfs_history"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*"),
+            ],
+            initialfile="terminal_history.cfs_history",
+        )
+        if not path:
+            return
+
+        content = "\n".join(self.terminal_history)
+        try:
+            Path(path).write_text(content, encoding="utf-8")
+        except OSError:
+            messagebox.showerror("Terminal History", "Unable to save terminal history.")
+            return
+
+        messagebox.showinfo(
+            "Terminal History",
+            f"Saved {len(self.terminal_history)} command(s).",
+        )
+
+    def load_terminal_history(self) -> None:
+        """Load a history file and execute each command in terminal mode."""
+        if self.calculator_mode.get() != "terminal":
+            messagebox.showinfo("Terminal History", "Switch to Terminal mode to load history.")
+            return
+
+        path = filedialog.askopenfilename(
+            title="Load Terminal History",
+            filetypes=[
+                ("Calcforshort history", "*.cfs_history"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+
+        try:
+            raw_content = Path(path).read_text(encoding="utf-8")
+        except OSError:
+            messagebox.showerror("Terminal History", "Unable to read terminal history file.")
+            return
+
+        commands = [line.rstrip() for line in raw_content.splitlines() if line.strip()]
+        if not commands:
+            messagebox.showinfo("Terminal History", "History file contains no commands.")
+            return
+
+        reset_before_loading = messagebox.askyesno(
+            "Terminal History",
+            "Reset current terminal session before loading history?",
+        )
+        if reset_before_loading:
+            self._initialize_terminal_editor()
+
+        for command in commands:
+            self._replace_terminal_input(command)
+            self._submit_terminal_line()
+
+        messagebox.showinfo(
+            "Terminal History",
+            f"Loaded and ran {len(commands)} command(s).",
+        )
 
     def toggle_single_letter_variables(self) -> None:
         """Enable or disable single-letter variable parsing in expressions."""
